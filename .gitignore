@@ -11,7 +11,8 @@ node_modules
 dist
 dist-ssr
 release
-_batch_*.json
+_push_*.txt
+_batch_*
 *.local
 
 # Editor directories and files
