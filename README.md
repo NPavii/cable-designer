@@ -1,73 +1,40 @@
-# React + TypeScript + Vite
+# Кабельный дизайнер (cable-designer)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Интерактивный конструктор кабельных журналов: редактор кабелей с автоматической раскладкой по листам А4.
 
-Currently, two official plugins are available:
+## Возможности
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Раскладка по А4:** максимум 16 жил + таблица на один лист; если кабель не помещается — остальные жилы автоматически переносятся на следующий лист (по 16 жил).
+- **Рамка по ГОСТ:** поля листа 20 мм слева и 5 мм остальные, внизу — обозначение документа и «Лист N из M».
+- **Стороны кабеля:** каждая сторона (А/Б) — либо свободные концы с наконечниками (НШВИ, кольцо М4/М5, вилочный, НКИ, РПИ), либо «датчик»: прямоугольник с названием и кратким описанием, в который заходят провода.
+- **Таблица жил:** номер, маркировка, цвет, наконечники сторон А и Б + произвольные пользовательские столбцы (добавляются кнопкой «+ Столбец», редактируются для каждой жилы).
+- **Экспорт в PDF:** кнопка «Экспорт в PDF (А4)» — в диалоге печати выберите «Сохранить как PDF», формат А4, поля «Нет».
+- **Автосохранение** проекта в localStorage браузера.
 
-## React Compiler
+## Технологии
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+React 19 + TypeScript + Vite + Tailwind CSS + Electron (обёртка для Windows exe).
 
-## Expanding the ESLint configuration
+## Запуск для разработки
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev        # http://localhost:3000
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Сборка
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run build      # веб-сборка в dist/
+npm run dist       # exe-установщик в release/ (electron-builder)
 ```
+
+## Структура
+
+- `src/pages/Home.tsx` — главная страница (редактор + предпросмотр)
+- `src/components/SheetA4.tsx` — лист А4, рамка, штамп, пагинация
+- `src/components/CableSvg.tsx` — SVG-рисунок кабеля (жилы, наконечники, датчики)
+- `src/types/cable.ts` — типы, библиотека наконечников и цветов, пагинация (MAX_WIRES_PER_SHEET = 16)
+- `electron/main.cjs` — окно Electron
+
+Папка `src/components/ui/` (шаблонные компоненты shadcn) в проект не входит — приложение их не использует.
