@@ -126,6 +126,10 @@ export default function CableSvg({
   const sensorAX = bodyL - fanL - 40;          // правая грань датчика А
   const sensorBX = bodyR + fanL + 40;          // левая грань датчика Б
 
+  // Маркировка стороны Б: своя при двойной маркировке, иначе общая
+  const markingB = (w: (typeof wires)[number]) =>
+    cable.markingMode === 'dual' ? (w.markingB ?? w.marking) : w.marking;
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ fontFamily: 'Arial, sans-serif' }}>
       {/* Сторона А (слева) */}
@@ -177,7 +181,7 @@ export default function CableSvg({
             <g key={w.id}>
               <line x1={bodyR} y1={cy} x2={xEnd - 26} y2={y} stroke={w.color} strokeWidth={3} />
               <Tip x={xEnd - 26} y={y} shape={tipOf(w.tipB)} side={1} />
-              <text x={xEnd + 4} y={y - 6} fontSize={11} textAnchor="start">{w.marking}</text>
+              <text x={xEnd + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
             </g>
           );
         })
@@ -199,7 +203,7 @@ export default function CableSvg({
             return (
               <g key={w.id}>
                 <line x1={bodyR} y1={cy} x2={lineEndX} y2={y} stroke={w.color} strokeWidth={3} />
-                <text x={sensorBX + sensorW + 4} y={y - 6} fontSize={11} textAnchor="start">{w.marking}</text>
+                <text x={sensorBX + sensorW + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
               </g>
             );
           })}

@@ -4,10 +4,14 @@ import CableSvg from './CableSvg';
 
 const tipName = (id: string) => TIP_LIBRARY.find((t) => t.id === id)?.name ?? '—';
 
-function cellValue(w: Wire, idx: number, key: string) {
+function cellValue(w: Wire, idx: number, key: string, markingMode: 'single' | 'dual') {
   switch (key) {
     case 'num': return String(idx + 1);
-    case 'marking': return w.marking;
+    case 'marking':
+      // Двойная маркировка: в одном столбце показываем обе — «А / Б»
+      return markingMode === 'dual'
+        ? `${w.marking} / ${w.markingB ?? w.marking}`
+        : w.marking;
     case 'color': return WIRE_COLORS.find((c) => c.id === w.color)?.name ?? w.color;
     case 'tipA': return tipName(w.tipA);
     case 'tipB': return tipName(w.tipB);
@@ -34,7 +38,11 @@ export function CableBlock({
         <thead>
           <tr>
             {cable.columns.map((c) => (
-              <th key={c.id}>{c.title}</th>
+              <th key={c.id}>{
+                c.key === 'marking' && cable.markingMode === 'dual'
+                  ? 'Маркировка А / Б'
+                  : c.title
+              }</th>
             ))}
           </tr>
         </thead>
@@ -42,7 +50,7 @@ export function CableBlock({
           {wires.map((w, i) => (
             <tr key={w.id}>
               {cable.columns.map((c) => (
-                <td key={c.id}>{cellValue(w, wireStart + i, c.key === 'custom' ? c.customKey ?? '' : c.key)}</td>
+                <td key={c.id}>{cellValue(w, wireStart + i, c.key === 'custom' ? c.customKey ?? '' : c.key, cable.markingMode)}</td>
               ))}
             </tr>
           ))}

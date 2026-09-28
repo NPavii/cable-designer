@@ -1,9 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Cable, Project, SideMode, Wire } from '../types/cable';
 import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeWires, uid } from '../types/cable';
 import SheetA4 from '../components/SheetA4';
 
 const LS_KEY = 'cable-designer-project-v2';
+const PANEL_W_KEY = 'cable-designer-panel-w';
+const PANEL_MIN = 380;
+const PANEL_MAX = 1200;
 
 const defaultProject = (): Project => ({
   docNumber: 'АНК 601Н-45 00 00 МЭ',
@@ -28,6 +31,7 @@ function load(): Project {
           sideASensorDesc: '',
           sideBSensorName: '',
           sideBSensorDesc: '',
+          markingMode: 'single',
           ...c,
         }));
       }
@@ -40,6 +44,35 @@ function load(): Project {
 export default function Home() {
   const [project, setProject] = useState<Project>(load);
   const [activeId, setActiveId] = useState<string>(project.cables[0]?.id ?? '');
+
+  // Ширина боковой панели — запоминается между запусками
+  const [panelW, setPanelW] = useState<number>(() => {
+    const v = parseInt(localStorage.getItem(PANEL_W_KEY) || '460');
+    return Number.isFinite(v) ? Math.min(PANEL_MAX, Math.max(PANEL_MIN, v)) : 460;
+  });
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+
+  // Зацепили правый край панели — тянем, меняя ширину
+  const onPanelResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startW: panelW };
+    const onMove = (ev: MouseEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      setPanelW(Math.min(PANEL_MAX, Math.max(PANEL_MIN, d.startW + ev.clientX - d.startX)));
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      setPanelW((w) => {
+        localStorage.setItem(PANEL_W_KEY, String(w));
+        return w;
+      });
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
 
   useEffect(() => {
     localStorage.setItem(LS_KEY, JSON.stringify(project));
@@ -149,7 +182,10 @@ export default function Home() {
   return (
     <div className="flex h-screen app-root">
       {/* Панель редактора */}
-      <div className="w-[460px] shrink-0 overflow-y-auto border-r p-4 space-y-4 no-print bg-gray-50">
+      <div
+        className="shrink-0 overflow-y-auto border-r p-4 space-y-4 no-print bg-gray-50"
+        style={{ width: panelW }}
+      >
         <h1 className="text-lg font-bold">Конструктор кабелей</h1>
 
         <section className="space-y-2">
@@ -203,6 +239,21 @@ export default function Home() {
               <div><span className={lbl}>Длина, мм</span>
                 <input className={inp} type="number" min={0} value={cable.lengthMm}
                   onChange={(e) => patchCable({ lengthMm: parseInt(e.target.value) || 0 })} /></div>
+              <div className="col-span-2">
+                <span className={lbl}>Маркировка жил</span>
+                <div className="flex gap-3 pt-1">
+                  <label className="flex items-center gap-1 text-xs cursor-pointer">
+                    <input type="radio" name="markingMode" checked={cable.markingMode === 'single'}
+                      onChange={() => patchCable({ markingMode: 'single' })} />
+                    Одна на два конца
+                  </label>
+                  <label className="flex items-center gap-1 text-xs cursor-pointer">
+                    <input type="radio" name="markingMode" checked={cable.markingMode === 'dual'}
+                      onChange={() => patchCable({ markingMode: 'dual' })} />
+                    У каждого конца своя
+                  </label>
+                </div>
+              </div>
             </div>
             <div className="text-xs text-gray-500">
               Итог: <b>Кабель {cable.cores}х{cable.section} — {(cable.lengthMm / 1000).toLocaleString('ru-RU')} м</b>
@@ -231,7 +282,14 @@ export default function Home() {
             <table className="w-full text-xs border">
               <thead>
                 <tr className="bg-gray-100">
-                  <th className="border p-1">Марк.</th>
+                  {cable.markingMode === 'dual' ? (
+                    <>
+                      <th className="border p-1">Марк. А</th>
+                      <th className="border p-1">Марк. Б</th>
+                    </>
+                  ) : (
+                    <th className="border p-1">Марк.</th>
+                  )}
                   <th className="border p-1">Цвет</th>
                   <th className="border p-1">Стор. А</th>
                   <th className="border p-1">Стор. Б</th>
@@ -243,9 +301,21 @@ export default function Home() {
               <tbody>
                 {cable.wires.slice(0, cable.cores).map((w) => (
                   <tr key={w.id}>
-                    <td className="border p-0.5">
-                      <input className="w-12 text-xs px-1" value={w.marking}
-                        onChange={(e) => patchWire(w.id, { marking: e.target.value })} /></td>
+                    {cable.markingMode === 'dual' ? (
+                      <>
+                        <td className="border p-0.5">
+                          <input className="w-12 text-xs px-1" value={w.marking}
+                            onChange={(e) => patchWire(w.id, { marking: e.target.value })} /></td>
+                        <td className="border p-0.5">
+                          <input className="w-12 text-xs px-1" value={w.markingB ?? ''}
+                            placeholder={w.marking}
+                            onChange={(e) => patchWire(w.id, { markingB: e.target.value })} /></td>
+                      </>
+                    ) : (
+                      <td className="border p-0.5">
+                        <input className="w-12 text-xs px-1" value={w.marking}
+                          onChange={(e) => patchWire(w.id, { marking: e.target.value })} /></td>
+                    )}
                     <td className="border p-0.5">
                       <select className="text-xs" value={w.color}
                         onChange={(e) => patchWire(w.id, { color: e.target.value })}>
@@ -306,6 +376,13 @@ export default function Home() {
           В диалоге печати выберите «Сохранить как PDF», формат А4, поля «Нет».
         </p>
       </div>
+
+      {/* Ручка изменения ширины панели */}
+      <div
+        className="no-print shrink-0 w-1.5 cursor-col-resize bg-gray-300 hover:bg-blue-500 active:bg-blue-600 transition-colors"
+        onMouseDown={onPanelResizeStart}
+        title="Зажмите и потяните, чтобы изменить ширину панели"
+      />
 
       {/* Предпросмотр листа */}
       <div className="flex-1 overflow-auto bg-gray-300 p-6 print-area">

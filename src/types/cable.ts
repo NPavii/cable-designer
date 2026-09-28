@@ -8,12 +8,16 @@ export interface TipType {
 
 export interface Wire {
   id: string;
-  marking: string;   // U, V, W, PE, 1, 2 ...
-  color: string;     // цвет изоляции
-  tipA: string;      // id наконечника, сторона А
-  tipB: string;      // id наконечника, сторона Б
+  marking: string;    // маркировка (сторона А и, в моно-режиме, сторона Б)
+  markingB?: string;  // маркировка стороны Б (только при markingMode = 'dual')
+  color: string;      // цвет изоляции
+  tipA: string;       // id наконечника, сторона А
+  tipB: string;       // id наконечника, сторона Б
   custom?: Record<string, string>;  // значения пользовательских столбцов (по customKey)
 }
+
+/** Режим маркировки: одна на оба конца или своя на каждый конец */
+export type MarkingMode = 'single' | 'dual';
 
 export type ColumnKey = 'num' | 'marking' | 'color' | 'tipA' | 'tipB' | 'custom';
 
@@ -28,11 +32,12 @@ export type SideMode = 'tips' | 'sensor';
 
 export interface Cable {
   id: string;
-  designation: string; // обозначение, например «АНК 601Н-45 01 00»
+  designation: string;  // обозначение, например «АНК 601Н-45 01 00»
   name: string;         // наименование, например «Отвод короба (XS4)»
   cores: number;        // количество жил
   section: string;      // сечение, например «0,75»
   lengthMm: number;     // длина, мм
+  markingMode: MarkingMode;  // маркировка: одна на два конца / у каждого конца своя
   wires: Wire[];        // длина массива = cores
   columns: TableColumn[];
   note: string;         // примечания
@@ -102,6 +107,7 @@ export function makeCable(n: number): Cable {
     cores,
     section: '0,75',
     lengthMm: 4000,
+    markingMode: 'single',
     wires: makeWires(cores),
     columns: [
       { id: uid(), title: '№ жилы', key: 'num' },
