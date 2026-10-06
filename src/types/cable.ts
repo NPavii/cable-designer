@@ -45,16 +45,14 @@ export interface Cable {
   sideBMode: SideMode;  // сторона Б: наконечники или датчик
   sideASensorName: string;  // название квадрата датчика, сторона А
   sideASensorDesc: string;  // краткое описание датчика, сторона А
+  sideASensorExtra: string; // дополнительно: особенности датчика, сторона А
   sideBSensorName: string;  // название квадрата датчика, сторона Б
   sideBSensorDesc: string;  // краткое описание датчика, сторона Б
+  sideBSensorExtra: string; // дополнительно: особенности датчика, сторона Б
 }
 
 export interface Project {
   docNumber: string;   // АНК 601Н-45 00 00 МЭ
-  title: string;       // Кабель двигателя
-  developer: string;
-  checker: string;
-  org: string;         // ВКП «Сигнал-Пак»
   cables: Cable[];
 }
 
@@ -121,8 +119,10 @@ export function makeCable(n: number): Cable {
     sideBMode: 'tips',
     sideASensorName: '',
     sideASensorDesc: '',
+    sideASensorExtra: '',
     sideBSensorName: '',
     sideBSensorDesc: '',
+    sideBSensorExtra: '',
   };
 }
 

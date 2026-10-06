@@ -119,6 +119,64 @@
   vertical-align: middle;
 }
 
+/* === Окно «Выбрать и печатать» === */
+.sel-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #3f3f46;
+  overflow: auto;
+  padding: 14px 18px;
+}
+.sel-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2b2b31;
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+}
+.sel-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  justify-content: center;
+}
+.sel-card {
+  background: #2b2b31;
+  border-radius: 8px;
+  padding: 8px;
+}
+.sel-card.sheet-skip {
+  opacity: 0.45;
+}
+.sel-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #e2e2e6;
+  font-size: 12.5px;
+  padding: 2px 4px 8px;
+  cursor: pointer;
+  user-select: none;
+}
+.sel-mini {
+  width: calc(210mm * 0.42);
+  height: calc(297mm * 0.42);
+  overflow: hidden;
+  border-radius: 4px;
+}
+.sel-mini > .a4-sheet {
+  margin: 0;
+  transform: scale(0.42);
+  transform-origin: top left;
+  box-shadow: none;
+}
+
 /* === Печать / экспорт в PDF === */
 @media print {
   .app-root {
@@ -133,10 +191,46 @@
     background: white !important;
     overflow: visible !important;
   }
+  /* лист чуть ниже страницы: рамка и штамп не должны разрывать страницу */
   .a4-sheet {
     box-shadow: none;
+    width: 200mm;
+    height: 288mm;
+    min-height: 0;
+    margin: 0;
+    page-break-after: always;
+    page-break-inside: avoid;
+  }
+  .a4-frame {
+    min-height: 0;
+    height: 276mm;
+  }
+  /* окно выбора в печати: миниатюры раскрываются в полный размер */
+  .sel-root {
+    position: static;
+    padding: 0;
+    background: white;
+    overflow: visible;
+  }
+  .sel-list {
+    display: block;
+  }
+  .sel-card {
+    background: white;
+    padding: 0;
+    border-radius: 0;
+  }
+  .sel-card.sheet-skip {
+    display: none !important;
+  }
+  .sel-mini {
     width: auto;
-    min-height: auto;
+    height: auto;
+    overflow: visible;
+  }
+  .sel-mini > .a4-sheet {
+    transform: none;
+    width: 200mm;
   }
   body {
     background: white;

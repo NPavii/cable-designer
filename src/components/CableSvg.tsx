@@ -46,33 +46,48 @@ function Tip({ x, y, shape, side }: { x: number; y: number; shape: TipShape; sid
   }
 }
 
-// Рисуем датчик (прямоугольник с подписями)
+// Рисуем датчик (прямоугольник). Текст выносим в SensorLabel и рисуем
+// ПОСЛЕ проводов — иначе надпись оказывается под жилами и нечитаема.
 function SensorBox({
-  x, y, width, height, name, desc, side
+  x, y, width, height, side
 }: {
-  x: number; y: number; width: number; height: number;
-  name: string; desc: string; side: 1 | -1;
+  x: number; y: number; width: number; height: number; side: 1 | -1;
 }) {
   const stroke = '#111';
+  const rectX = side === 1 ? x : x - width;
+  return (
+    <rect
+      x={rectX}
+      y={y - height / 2}
+      width={width}
+      height={height}
+      stroke={stroke}
+      strokeWidth={1.5}
+      fill="white"
+    />
+  );
+}
+
+// Подписи датчика поверх проводов, с белым ореолом для читаемости.
+// Три строки: название, краткое описание, «Дополнительно» (особенности датчика).
+function SensorLabel({
+  x, y, width, name, desc, extra, side
+}: {
+  x: number; y: number; width: number; name: string; desc: string; extra?: string; side: 1 | -1;
+}) {
   const rectX = side === 1 ? x : x - width;
   const textX = rectX + width / 2;
   return (
     <g>
-      <rect
-        x={rectX}
-        y={y - height / 2}
-        width={width}
-        height={height}
-        stroke={stroke}
-        strokeWidth={1.5}
-        fill="white"
-      />
       <text
         x={textX}
         y={y - 4}
         fontSize={12}
         textAnchor="middle"
         fontWeight="bold"
+        stroke="white"
+        strokeWidth={5}
+        paintOrder="stroke"
       >
         {name || 'Датчик'}
       </text>
@@ -82,9 +97,26 @@ function SensorBox({
         fontSize={9}
         textAnchor="middle"
         fill="#333"
+        stroke="white"
+        strokeWidth={4}
+        paintOrder="stroke"
       >
         {desc}
       </text>
+      {extra && (
+        <text
+          x={textX}
+          y={y + 23}
+          fontSize={8}
+          textAnchor="middle"
+          fill="#555"
+          stroke="white"
+          strokeWidth={4}
+          paintOrder="stroke"
+        >
+          {extra}
+        </text>
+      )}
     </g>
   );
 }
@@ -119,7 +151,9 @@ export default function CableSvg({
     TIP_LIBRARY.find((t) => t.id === id)?.shape ?? 'none';
 
   const sensorW = 90;
-  const sensorH = Math.max(50, n * spreadStep + 14);
+  // место под третью строку «Дополнительно», если она задана на любой стороне
+  const hasExtra = !!(cable.sideASensorExtra || cable.sideBSensorExtra);
+  const sensorH = Math.max(50, n * spreadStep + 14 + (hasExtra ? 12 : 0));
   const enterDepth = 25;         // насколько провода заходят внутрь датчика
 
   // Координаты датчиков
@@ -138,36 +172,55 @@ export default function CableSvg({
         wires.map((w, i) => {
           const y = cy + spread(i);
           const xEnd = bodyL - fanL - 40;
+          const xTip = xEnd + 26;
+          // Плавная S-кривая: горизонтальные касательные на выходе из кабеля и у наконечника
+          const dx = Math.max(24, (bodyL - xTip) * 0.5);
           return (
             <g key={w.id}>
-              <line x1={bodyL} y1={cy} x2={xEnd + 26} y2={y} stroke={w.color} strokeWidth={3} />
-              <Tip x={xEnd + 26} y={y} shape={tipOf(w.tipA)} side={-1} />
+              <path
+                d={`M ${bodyL} ${cy} C ${bodyL - dx} ${cy}, ${xTip + dx} ${y}, ${xTip} ${y}`}
+                stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+              />
+              <Tip x={xTip} y={y} shape={tipOf(w.tipA)} side={-1} />
               <text x={xEnd - 4} y={y - 6} fontSize={11} textAnchor="start">{w.marking}</text>
             </g>
           );
         })
       ) : (
-        // Датчик слева — провода заходят внутрь прямоугольника
+        // Датчик слева — провода плавно заходят внутрь прямоугольника
         <>
           <SensorBox
             x={sensorAX}
             y={cy}
             width={sensorW}
             height={sensorH}
-            name={cable.sideASensorName}
-            desc={cable.sideASensorDesc}
             side={-1}
           />
           {wires.map((w, i) => {
             const y = cy + spread(i);
             const lineEndX = sensorAX + enterDepth; // заходим внутрь датчика
+            // Горизонтальная касательная у грани датчика — провод «втыкается» ровно
+            const dx = Math.max(24, (bodyL - lineEndX) * 0.45);
             return (
               <g key={w.id}>
-                <line x1={bodyL} y1={cy} x2={lineEndX} y2={y} stroke={w.color} strokeWidth={3} />
+                <path
+                  d={`M ${bodyL} ${cy} C ${bodyL - dx} ${cy}, ${lineEndX + dx} ${y}, ${lineEndX} ${y}`}
+                  stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+                />
                 <text x={sensorAX - 4} y={y - 6} fontSize={11} textAnchor="end">{w.marking}</text>
               </g>
             );
           })}
+          {/* Подписи датчика поверх проводов */}
+          <SensorLabel
+            x={sensorAX}
+            y={cy}
+            width={sensorW}
+            name={cable.sideASensorName}
+            desc={cable.sideASensorDesc}
+            extra={cable.sideASensorExtra}
+            side={-1}
+          />
         </>
       )}
 
@@ -177,42 +230,60 @@ export default function CableSvg({
         wires.map((w, i) => {
           const y = cy + spread(i);
           const xEnd = bodyR + fanL + 40;
+          const xTip = xEnd - 26;
+          const dx = Math.max(24, (xTip - bodyR) * 0.5);
           return (
             <g key={w.id}>
-              <line x1={bodyR} y1={cy} x2={xEnd - 26} y2={y} stroke={w.color} strokeWidth={3} />
-              <Tip x={xEnd - 26} y={y} shape={tipOf(w.tipB)} side={1} />
+              <path
+                d={`M ${bodyR} ${cy} C ${bodyR + dx} ${cy}, ${xTip - dx} ${y}, ${xTip} ${y}`}
+                stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+              />
+              <Tip x={xTip} y={y} shape={tipOf(w.tipB)} side={1} />
               <text x={xEnd + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
             </g>
           );
         })
       ) : (
-        // Датчик справа — провода заходят внутрь прямоугольника
+        // Датчик справа — провода плавно заходят внутрь прямоугольника
         <>
           <SensorBox
             x={sensorBX}
             y={cy}
             width={sensorW}
             height={sensorH}
-            name={cable.sideBSensorName}
-            desc={cable.sideBSensorDesc}
             side={1}
           />
           {wires.map((w, i) => {
             const y = cy + spread(i);
             const lineEndX = sensorBX + sensorW - enterDepth; // заходим внутрь датчика
+            const dx = Math.max(24, (lineEndX - bodyR) * 0.45);
             return (
               <g key={w.id}>
-                <line x1={bodyR} y1={cy} x2={lineEndX} y2={y} stroke={w.color} strokeWidth={3} />
+                <path
+                  d={`M ${bodyR} ${cy} C ${bodyR + dx} ${cy}, ${lineEndX - dx} ${y}, ${lineEndX} ${y}`}
+                  stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+                />
                 <text x={sensorBX + sensorW + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
               </g>
             );
           })}
+          {/* Подписи датчика поверх проводов */}
+          <SensorLabel
+            x={sensorBX}
+            y={cy}
+            width={sensorW}
+            name={cable.sideBSensorName}
+            desc={cable.sideBSensorDesc}
+            extra={cable.sideBSensorExtra}
+            side={1}
+          />
         </>
       )}
 
-      {/* тело кабеля */}
-      <line x1={bodyL} y1={cy - 5} x2={bodyR} y2={cy - 5} stroke="#111" strokeWidth={1.4} />
-      <line x1={bodyL} y1={cy + 5} x2={bodyR} y2={cy + 5} stroke="#111" strokeWidth={1.4} />
+      {/* тело кабеля: жирный жгут — толстая основа + обводка, провода уходят под оболочку */}
+      <line x1={bodyL} y1={cy} x2={bodyR} y2={cy} stroke="#e8e8e8" strokeWidth={16} strokeLinecap="round" />
+      <line x1={bodyL} y1={cy - 8} x2={bodyR} y2={cy - 8} stroke="#111" strokeWidth={2.2} />
+      <line x1={bodyL} y1={cy + 8} x2={bodyR} y2={cy + 8} stroke="#111" strokeWidth={2.2} />
       {/* маркировка кабеля */}
       <text x={W / 2} y={cy - 12} fontSize={14} textAnchor="middle">{label}</text>
       {/* размер длины */}

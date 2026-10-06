@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Cable, Project, SideMode, Wire } from '../types/cable';
-import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeWires, uid } from '../types/cable';
+import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeWires, paginateCables, uid } from '../types/cable';
 import SheetA4 from '../components/SheetA4';
 
 const LS_KEY = 'cable-designer-project-v2';
@@ -10,40 +10,153 @@ const PANEL_MAX = 1200;
 
 const defaultProject = (): Project => ({
   docNumber: 'АНК 601Н-45 00 00 МЭ',
-  title: 'Кабель двигателя',
-  developer: '',
-  checker: '',
-  org: '',
   cables: [makeCable(1)],
 });
+
+// Миграция старых данных: добавляем новые поля, если их нет; проверяем структуру
+function migrateProject(parsed: any): Project {
+  if (!parsed || !Array.isArray(parsed.cables) || parsed.cables.length === 0) {
+    throw new Error('invalid project file');
+  }
+  parsed.cables = parsed.cables.map((c: any) => ({
+    sideAMode: 'tips',
+    sideBMode: 'tips',
+    sideASensorName: '',
+    sideASensorDesc: '',
+    sideASensorExtra: '',
+    sideBSensorName: '',
+    sideBSensorDesc: '',
+    sideBSensorExtra: '',
+    markingMode: 'single',
+    ...c,
+  }));
+  if (typeof parsed.docNumber !== 'string') parsed.docNumber = '';
+  return parsed as Project;
+}
 
 function load(): Project {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
-      // Миграция старых данных: добавляем новые поля если их нет
-      if (parsed.cables) {
-        parsed.cables = parsed.cables.map((c: any) => ({
-          sideAMode: 'tips',
-          sideBMode: 'tips',
-          sideASensorName: '',
-          sideASensorDesc: '',
-          sideBSensorName: '',
-          sideBSensorDesc: '',
-          markingMode: 'single',
-          ...c,
-        }));
-      }
-      return parsed;
+      return migrateProject(JSON.parse(raw));
     }
   } catch { /* ignore */ }
   return defaultProject();
 }
 
+const inp = 'border border-gray-300 rounded px-2 py-1 text-sm w-full';
+const lbl = 'text-xs text-gray-500 block mb-0.5';
+
+// Редактор стороны кабеля. Вынесен из Home на верхний уровень модуля:
+// вложенное определение создавало новый тип компонента на каждый рендер,
+// React перемонтировал поля и терял фокус после каждой введённой буквы.
+function SideEditor({
+  side,
+  label,
+  mode,
+  name,
+  desc,
+  extra,
+  onChange,
+}: {
+  side: 'A' | 'B';
+  label: string;
+  mode: SideMode;
+  name: string;
+  desc: string;
+  extra: string;
+  onChange: (p: Partial<Cable>) => void;
+}) {
+  return (
+    <div className="border rounded p-2 bg-white space-y-2">
+      <div className="font-semibold text-xs">{label}</div>
+      <div className="flex gap-2">
+        <label className="flex items-center gap-1 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name={`side${side}Mode`}
+            checked={mode === 'tips'}
+            onChange={() => onChange({ [`side${side}Mode`]: 'tips' } as any)}
+          />
+          Свободные концы
+        </label>
+        <label className="flex items-center gap-1 text-xs cursor-pointer">
+          <input
+            type="radio"
+            name={`side${side}Mode`}
+            checked={mode === 'sensor'}
+            onChange={() => onChange({ [`side${side}Mode`]: 'sensor' } as any)}
+          />
+          Датчик
+        </label>
+      </div>
+      {mode === 'sensor' && (
+        <div className="space-y-1">
+          <div>
+            <span className={lbl}>Название квадрата</span>
+            <input
+              className={inp}
+              value={name}
+              onChange={(e) => onChange({ [`side${side}SensorName`]: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <span className={lbl}>Краткое описание</span>
+            <input
+              className={inp}
+              value={desc}
+              onChange={(e) => onChange({ [`side${side}SensorDesc`]: e.target.value } as any)}
+            />
+          </div>
+          <div>
+            <span className={lbl}>Дополнительно</span>
+            <input
+              className={inp}
+              value={extra}
+              placeholder="особенности датчика"
+              onChange={(e) => onChange({ [`side${side}SensorExtra`]: e.target.value } as any)}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Home() {
   const [project, setProject] = useState<Project>(load);
   const [activeId, setActiveId] = useState<string>(project.cables[0]?.id ?? '');
+  // Путь текущего файла проекта (null — ещё не сохранён)
+  const [filePath, setFilePath] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Признак несохранённых изменений (ref — для window.__cableIsDirty, state — для индикатора)
+  const dirtyRef = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const suppressDirty = useRef(true); // первая запись (загрузка из localStorage) — не изменение
+  const setDirtyBoth = (v: boolean) => { dirtyRef.current = v; setDirty(v); };
+
+  // Экспортируем проверку для главного процесса Electron (диалог при закрытии окна)
+  useEffect(() => {
+    window.__cableIsDirty = () => dirtyRef.current;
+    return () => { delete window.__cableIsDirty; };
+  }, []);
+
+  // --- выборочная печать: окно с чекбоксами листов ---
+  const totalSheets = paginateCables(project.cables).length + 1; // листы кабелей + перечень
+  const [selOpen, setSelOpen] = useState(false);
+  const [selPages, setSelPages] = useState<Set<number>>(new Set());
+  const openSel = () => {
+    setSelPages(new Set(Array.from({ length: totalSheets }, (_, i) => i)));
+    setSelOpen(true);
+  };
+  const togglePage = (i: number) =>
+    setSelPages((s) => {
+      const n = new Set(s);
+      if (n.has(i)) n.delete(i);
+      else n.add(i);
+      return n;
+    });
 
   // Ширина боковой панели — запоминается между запусками
   const [panelW, setPanelW] = useState<number>(() => {
@@ -76,6 +189,13 @@ export default function Home() {
 
   useEffect(() => {
     localStorage.setItem(LS_KEY, JSON.stringify(project));
+    // Любое изменение проекта помечает документ как несохранённый,
+    // кроме загрузки (старта/открытия файла)
+    if (suppressDirty.current) {
+      suppressDirty.current = false;
+      return;
+    }
+    setDirtyBoth(true);
   }, [project]);
 
   const cable = useMemo(
@@ -103,6 +223,86 @@ export default function Home() {
     setActiveId(c.id);
   };
 
+  // Полная копия выбранного кабеля: новые id у кабеля, жил и столбцов.
+  // customKey столбцов сохраняем — по ним привязаны значения жил (wire.custom).
+  const duplicateCable = () => {
+    if (!cable) return;
+    const copy: Cable = JSON.parse(JSON.stringify(cable));
+    copy.id = uid();
+    copy.designation = `${cable.designation} (копия)`;
+    copy.wires = copy.wires.map((w) => ({ ...w, id: uid() }));
+    copy.columns = copy.columns.map((c) => ({ ...c, id: uid() }));
+    const idx = project.cables.findIndex((c) => c.id === cable.id);
+    const cables = [...project.cables];
+    cables.splice(idx + 1, 0, copy);
+    patch({ cables });
+    setActiveId(copy.id);
+  };
+
+  // --- Работа с файлом проекта: Сохранить / Сохранить как / Открыть ---
+  const serialize = () =>
+    JSON.stringify({ app: 'cable-designer', version: 2, docNumber: project.docNumber, cables: project.cables }, null, 2);
+
+  const defaultFileName = () =>
+    `${(project.docNumber.trim() || 'проект').replace(/[\\/:*?"<>|]/g, '_')}.json`;
+
+  const applyOpened = (content: string, path: string | null) => {
+    try {
+      const p = migrateProject(JSON.parse(content));
+      suppressDirty.current = true; // загрузка файла — не изменение
+      setProject(p);
+      setActiveId(p.cables[0]?.id ?? '');
+      setFilePath(path);
+      setDirtyBoth(false);
+    } catch {
+      alert('Не удалось открыть файл: это не проект кабельного дизайнера или файл повреждён.');
+    }
+  };
+
+  const saveAs = async () => {
+    if (window.cableFiles) {
+      const r = await window.cableFiles.saveAs(defaultFileName(), serialize());
+      if (!r.canceled && r.path) {
+        setFilePath(r.path);
+        setDirtyBoth(false);
+      }
+    } else {
+      // Запасной вариант для браузера: скачивание JSON
+      const blob = new Blob([serialize()], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = defaultFileName();
+      a.click();
+      URL.revokeObjectURL(a.href);
+      setDirtyBoth(false);
+    }
+  };
+
+  const save = async () => {
+    if (window.cableFiles && filePath) {
+      await window.cableFiles.save(filePath, serialize());
+      setDirtyBoth(false);
+    } else {
+      await saveAs();
+    }
+  };
+
+  const openProject = () => {
+    if (dirtyRef.current &&
+        !window.confirm('Есть несохранённые изменения. Открыть другой файл без сохранения?')) {
+      return;
+    }
+    if (window.cableFiles) {
+      window.cableFiles.open().then((r) => {
+        if (r.canceled || !r.content) return;
+        applyOpened(r.content, r.path ?? null);
+      });
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+  // --- конец блока работы с файлом ---
+
   const removeCable = () => {
     if (project.cables.length <= 1) return;
     const rest = project.cables.filter((c) => c.id !== cable.id);
@@ -118,67 +318,6 @@ export default function Home() {
       ],
     });
 
-  const inp = 'border border-gray-300 rounded px-2 py-1 text-sm w-full';
-  const lbl = 'text-xs text-gray-500 block mb-0.5';
-
-  const SideEditor = ({
-    side,
-    label,
-    mode,
-    name,
-    desc,
-  }: {
-    side: 'A' | 'B';
-    label: string;
-    mode: SideMode;
-    name: string;
-    desc: string;
-  }) => (
-    <div className="border rounded p-2 bg-white space-y-2">
-      <div className="font-semibold text-xs">{label}</div>
-      <div className="flex gap-2">
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input
-            type="radio"
-            name={`side${side}Mode`}
-            checked={mode === 'tips'}
-            onChange={() => patchCable({ [`side${side}Mode`]: 'tips' } as any)}
-          />
-          Свободные концы
-        </label>
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input
-            type="radio"
-            name={`side${side}Mode`}
-            checked={mode === 'sensor'}
-            onChange={() => patchCable({ [`side${side}Mode`]: 'sensor' } as any)}
-          />
-          Датчик
-        </label>
-      </div>
-      {mode === 'sensor' && (
-        <div className="space-y-1">
-          <div>
-            <span className={lbl}>Название квадрата</span>
-            <input
-              className={inp}
-              value={name}
-              onChange={(e) => patchCable({ [`side${side}SensorName`]: e.target.value } as any)}
-            />
-          </div>
-          <div>
-            <span className={lbl}>Краткое описание</span>
-            <input
-              className={inp}
-              value={desc}
-              onChange={(e) => patchCable({ [`side${side}SensorDesc`]: e.target.value } as any)}
-            />
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <div className="flex h-screen app-root">
       {/* Панель редактора */}
@@ -190,24 +329,45 @@ export default function Home() {
 
         <section className="space-y-2">
           <h2 className="font-semibold text-sm">Документ</h2>
-          <div className="grid grid-cols-2 gap-2">
-            <div><span className={lbl}>Обозначение</span>
-              <input className={inp} value={project.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} /></div>
-            <div><span className={lbl}>Наименование</span>
-              <input className={inp} value={project.title} onChange={(e) => patch({ title: e.target.value })} /></div>
-            <div><span className={lbl}>Разработал</span>
-              <input className={inp} value={project.developer} onChange={(e) => patch({ developer: e.target.value })} /></div>
-            <div><span className={lbl}>Проверил</span>
-              <input className={inp} value={project.checker} onChange={(e) => patch({ checker: e.target.value })} /></div>
-            <div className="col-span-2"><span className={lbl}>Организация</span>
-              <input className={inp} value={project.org} onChange={(e) => patch({ org: e.target.value })} /></div>
+          <div>
+            <span className={lbl}>Обозначение</span>
+            <input className={inp} value={project.docNumber} onChange={(e) => patch({ docNumber: e.target.value })} />
           </div>
+          <div className="flex gap-1 items-center">
+            <button className="text-sm bg-gray-200 rounded px-2 py-1" onClick={openProject}>Открыть…</button>
+            <button className="text-sm bg-gray-200 rounded px-2 py-1" onClick={save}>Сохранить</button>
+            <button className="text-sm bg-gray-200 rounded px-2 py-1" onClick={saveAs}>Сохранить как…</button>
+            {dirty && (
+              <span className="text-xs text-amber-600 ml-1" title="Есть несохранённые изменения">● не сохранено</span>
+            )}
+          </div>
+          {filePath && (
+            <div className="text-xs text-gray-500 break-all" title={filePath}>
+              Файл: {filePath.split(/[\\/]/).pop()}
+            </div>
+          )}
+          {/* Запасной вариант открытия для запуска в браузере (без Electron) */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json,application/json"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (!f) return;
+              f.text().then((t) => applyOpened(t, null));
+              e.target.value = '';
+            }}
+          />
         </section>
 
         <section className="space-y-2">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold text-sm">Кабели</h2>
-            <button className="text-sm bg-blue-600 text-white rounded px-2 py-1" onClick={addCable}>+ Кабель</button>
+            <div className="flex gap-1">
+              <button className="text-sm bg-gray-200 rounded px-2 py-1" onClick={duplicateCable}>Дублировать</button>
+              <button className="text-sm bg-blue-600 text-white rounded px-2 py-1" onClick={addCable}>+ Кабель</button>
+            </div>
           </div>
           <div className="flex flex-wrap gap-1">
             {project.cables.map((c) => (
@@ -268,6 +428,8 @@ export default function Home() {
                 mode={cable.sideAMode}
                 name={cable.sideASensorName}
                 desc={cable.sideASensorDesc}
+                extra={cable.sideASensorExtra}
+                onChange={patchCable}
               />
               <SideEditor
                 side="B"
@@ -275,6 +437,8 @@ export default function Home() {
                 mode={cable.sideBMode}
                 name={cable.sideBSensorName}
                 desc={cable.sideBSensorDesc}
+                extra={cable.sideBSensorExtra}
+                onChange={patchCable}
               />
             </div>
 
@@ -367,13 +531,20 @@ export default function Home() {
           </section>
         )}
 
-        <button
-          className="w-full bg-green-600 text-white rounded py-2 font-semibold"
-          onClick={() => window.print()}>
-          Экспорт в PDF (А4)
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="flex-1 bg-blue-600 text-white rounded py-2 font-semibold"
+            onClick={openSel}>
+            Выбрать и печатать
+          </button>
+          <button
+            className="flex-1 bg-green-600 text-white rounded py-2 font-semibold"
+            onClick={() => window.print()}>
+            Экспорт в PDF (А4)
+          </button>
+        </div>
         <p className="text-xs text-gray-500">
-          В диалоге печати выберите «Сохранить как PDF», формат А4, поля «Нет».
+          «Выбрать и печатать» — окно с выбором листов. В диалоге печати выберите «Сохранить как PDF», формат А4, поля «Нет».
         </p>
       </div>
 
@@ -384,10 +555,52 @@ export default function Home() {
         title="Зажмите и потяните, чтобы изменить ширину панели"
       />
 
-      {/* Предпросмотр листа */}
-      <div className="flex-1 overflow-auto bg-gray-300 p-6 print-area">
+      {/* Предпросмотр листа (в печать не идёт, когда открыто окно выбора) */}
+      <div className={'flex-1 overflow-auto bg-gray-300 p-6 print-area' + (selOpen ? ' no-print' : '')}>
         <SheetA4 project={project} cables={project.cables} />
       </div>
+
+      {/* Окно «Выбрать и печатать»: предпросмотр листов с чекбоксами */}
+      {selOpen && (
+        <div className="sel-root">
+          <div className="sel-bar no-print">
+            <span className="text-sm text-gray-200">Отметьте листы для печати</span>
+            <div className="tb-spacer" />
+            <button
+              className="bg-green-600 text-white rounded px-4 py-1.5 text-sm font-semibold disabled:opacity-40"
+              disabled={selPages.size === 0}
+              onClick={() => window.print()}>
+              Печатать ({selPages.size})
+            </button>
+            <button
+              className="bg-gray-600 text-white rounded px-4 py-1.5 text-sm"
+              onClick={() => setSelOpen(false)}>
+              Закрыть
+            </button>
+          </div>
+          <div className="sel-list">
+            <SheetA4
+              project={project}
+              cables={project.cables}
+              renderWrap={(node, idx, total) => (
+                <div
+                  key={idx}
+                  className={'sel-card' + (selPages.has(idx) ? '' : ' sheet-skip')}>
+                  <label className="sel-card-head no-print">
+                    <input
+                      type="checkbox"
+                      checked={selPages.has(idx)}
+                      onChange={() => togglePage(idx)}
+                    />
+                    Лист {idx + 1} из {total}
+                  </label>
+                  <div className="sel-mini">{node}</div>
+                </div>
+              )}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

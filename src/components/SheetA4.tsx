@@ -70,53 +70,151 @@ export function CableBlock({
   );
 }
 
-// Лист А4 с рамкой и штампом по ГОСТ 2.301
-export default function SheetA4({ project, cables }: { project: Project; cables: Cable[] }) {
-  const sheets = paginateCables(cables);
-  const totalSheets = sheets.length;
+/** Максимальное количество строк перечня кабелей на одном листе А4 */
+const SUMMARY_ROWS_PER_SHEET = 25;
 
+/** Финальный лист А4 — динамический перечень всех кабелей проекта */
+function SummarySheet({
+  cables,
+  startIdx,
+  sheetNum,
+  totalSheets,
+  docNumber,
+}: {
+  cables: Cable[];
+  startIdx: number;
+  sheetNum: number;
+  totalSheets: number;
+  docNumber: string;
+}) {
   return (
-    <>
-      {sheets.map((pageGroup, sheetIdx) => {
-        const sheetNum = sheetIdx + 1;
-        // На одном листе ровно 1 CablePage
-        const page = pageGroup[0];
-        return (
-          <div className="a4-sheet" key={`sheet-${sheetNum}`}>
-            <div className="a4-frame">
-              <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
-                <CableBlock
-                  cable={page.cable}
-                  wireStart={page.wireStart}
-                  wireCount={page.wireCount}
-                />
-              </div>
+    <div className="a4-sheet">
+      <div className="a4-frame">
+        <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
+          <div style={{ textAlign: 'center', fontSize: '14pt', fontWeight: 'bold', marginBottom: '4mm' }}>
+            Перечень кабелей
+          </div>
+          <table className="gost-table">
+            <thead>
+              <tr>
+                <th style={{ width: '10mm' }}>№</th>
+                <th>Обозначение</th>
+                <th>Наименование</th>
+                <th style={{ width: '26mm' }}>Кабель</th>
+                <th style={{ width: '22mm' }}>Длина, мм</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cables.map((c, i) => (
+                <tr key={c.id}>
+                  <td>{startIdx + i + 1}</td>
+                  <td>{c.designation}</td>
+                  <td>{c.name || '—'}</td>
+                  <td>{c.cores}х{c.section}</td>
+                  <td>{c.lengthMm}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
-              {/* Упрощённая рамка / штамп */}
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: '5mm',
-                  left: '6mm',
-                  right: '6mm',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'flex-end',
-                  borderTop: '1.5px solid #000',
-                  paddingTop: '2mm',
-                }}
-              >
-                <div style={{ fontSize: '11pt', fontWeight: 'bold' }}>
-                  {project.docNumber}
-                </div>
-                <div style={{ fontSize: '10pt' }}>
-                  Лист {sheetNum} из {totalSheets}
-                </div>
+        {/* Упрощённая рамка / штамп */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '5mm',
+            left: '6mm',
+            right: '6mm',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-end',
+            borderTop: '1.5px solid #000',
+            paddingTop: '2mm',
+          }}
+        >
+          <div style={{ fontSize: '11pt', fontWeight: 'bold' }}>
+            {docNumber}
+          </div>
+          <div style={{ fontSize: '10pt' }}>
+            Лист {sheetNum} из {totalSheets}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Лист А4 с рамкой и штампом по ГОСТ 2.301
+export default function SheetA4({
+  project,
+  cables,
+  renderWrap,
+}: {
+  project: Project;
+  cables: Cable[];
+  /** Опциональная обёртка каждого листа (например, карточка с чекбоксом выбора) */
+  renderWrap?: (node: React.ReactElement, sheetIdx: number, total: number) => React.ReactElement;
+}) {
+  const sheets = paginateCables(cables);
+  const summarySheets: Cable[][] = [];
+  for (let i = 0; i < cables.length; i += SUMMARY_ROWS_PER_SHEET) {
+    summarySheets.push(cables.slice(i, i + SUMMARY_ROWS_PER_SHEET));
+  }
+  const totalSheets = sheets.length + summarySheets.length;
+
+  const elements: React.ReactElement[] = [
+    ...sheets.map((pageGroup, sheetIdx) => {
+      const sheetNum = sheetIdx + 1;
+      // На одном листе ровно 1 CablePage
+      const page = pageGroup[0];
+      return (
+        <div className="a4-sheet" key={`sheet-${sheetNum}`}>
+          <div className="a4-frame">
+            <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
+              <CableBlock
+                cable={page.cable}
+                wireStart={page.wireStart}
+                wireCount={page.wireCount}
+              />
+            </div>
+
+            {/* Упрощённая рамка / штамп */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '5mm',
+                left: '6mm',
+                right: '6mm',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-end',
+                borderTop: '1.5px solid #000',
+                paddingTop: '2mm',
+              }}
+            >
+              <div style={{ fontSize: '11pt', fontWeight: 'bold' }}>
+                {project.docNumber}
+              </div>
+              <div style={{ fontSize: '10pt' }}>
+                Лист {sheetNum} из {totalSheets}
               </div>
             </div>
           </div>
-        );
-      })}
-    </>
-  );
+        </div>
+      );
+    }),
+    ...summarySheets.map((group, i) => (
+      <SummarySheet
+        key={`summary-${i}`}
+        cables={group}
+        startIdx={i * SUMMARY_ROWS_PER_SHEET}
+        sheetNum={sheets.length + i + 1}
+        totalSheets={totalSheets}
+        docNumber={project.docNumber}
+      />
+    )),
+  ];
+
+  if (!renderWrap) return <>{elements}</>;
+  return <>{elements.map((el, i) => renderWrap(el, i, totalSheets))}</>;
 }
