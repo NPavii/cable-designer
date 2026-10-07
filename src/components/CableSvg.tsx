@@ -146,12 +146,12 @@ export default function CableSvg({
   const label = `${cable.cores}*${cable.section}`;
 
   // Сколько вертикальных слотов занимает каждая сторона
-  // (жила = 1 слот + слоты листьев её перемычек; в режиме датчика перемычки не рисуются)
-  const slotsA = wires.reduce((s, w) => s + (cable.sideAMode === 'tips' ? wireSlots(w, 'A') : 1), 0);
-  const slotsB = wires.reduce((s, w) => s + (cable.sideBMode === 'tips' ? wireSlots(w, 'B') : 1), 0);
-  const maxSlots = Math.max(n, slotsA, slotsB);
+  // (жила = 1 слот + слоты листьев её перемычек; скрытые жилы — 0;
+  // в режиме датчика перемычки не рисуются)
+  const slotsA = wires.reduce((s, w) => s + (cable.sideAMode === 'tips' ? wireSlots(w, 'A') : (w.hiddenA ? 0 : 1)), 0);
+  const slotsB = wires.reduce((s, w) => s + (cable.sideBMode === 'tips' ? wireSlots(w, 'B') : (w.hiddenB ? 0 : 1)), 0);
+  const maxSlots = Math.max(1, n, slotsA, slotsB);
 
-  const spread = (i: number) => (i - (n - 1) / 2) * spreadStep;
   const H = Math.max(160, maxSlots * spreadStep + 50);
   const cy = H / 2;
 
@@ -260,6 +260,7 @@ export default function CableSvg({
   const renderTipsSide = (side: 'A' | 'B'): ReactNode[] => {
     const dir: 1 | -1 = side === 'A' ? -1 : 1;
     const total = side === 'A' ? slotsA : slotsB;
+    if (total === 0) return []; // все жилы скрыты на этой стороне
     const xBody = side === 'A' ? bodyL : bodyR;
     const xJ = side === 'A' ? bodyL - fanL - 40 + 26 : bodyR + fanL + 40 - 26;
     const nodes: ReactNode[] = [];
@@ -268,6 +269,7 @@ export default function CableSvg({
     for (const w of wires) {
       const js = (side === 'A' ? w.jumpersA : w.jumpersB) ?? [];
       const wSlots = wireSlots(w, side);
+      if (wSlots === 0) continue; // жила скрыта на этой стороне
       // Точка соединения — в центре диапазона слотов жилы
       const yJ = slotCenter(total, slot + wSlots / 2 - 0.5);
       const dx = Math.max(24, Math.abs(xBody - xJ) * 0.5);
@@ -346,8 +348,8 @@ export default function CableSvg({
             height={sensorH}
             side={-1}
           />
-          {wires.map((w, i) => {
-            const y = cy + spread(i);
+          {wires.filter((w) => !w.hiddenA).map((w, i, vis) => {
+            const y = cy + (i - (vis.length - 1) / 2) * spreadStep;
             const lineEndX = sensorAX + enterDepth; // заходим внутрь датчика
             // Горизонтальная касательная у грани датчика — провод «втыкается» ровно
             const dx = Math.max(24, (bodyL - lineEndX) * 0.45);
@@ -387,8 +389,8 @@ export default function CableSvg({
             height={sensorH}
             side={1}
           />
-          {wires.map((w, i) => {
-            const y = cy + spread(i);
+          {wires.filter((w) => !w.hiddenB).map((w, i, vis) => {
+            const y = cy + (i - (vis.length - 1) / 2) * spreadStep;
             const lineEndX = sensorBX + sensorW - enterDepth; // заходим внутрь датчика
             const dx = Math.max(24, (lineEndX - bodyR) * 0.45);
             return (

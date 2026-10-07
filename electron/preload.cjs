@@ -14,4 +14,10 @@ contextBridge.exposeInMainWorld('cableUpdates', {
   check: () => ipcRenderer.invoke('update:check'),
   download: () => ipcRenderer.invoke('update:download'),
   apply: (staging) => ipcRenderer.invoke('update:apply', { staging }),
+  // Подписка на пункт меню Setting → «Обновления…»
+  onMenuUpdates: (cb) => {
+    const handler = () => cb()
+    ipcRenderer.on('menu:updates', handler)
+    return () => ipcRenderer.removeListener('menu:updates', handler)
+  },
 })

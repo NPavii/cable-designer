@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Cable, Jumper, Project, SideMode, Wire } from '../types/cable';
-import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeJumper, makeWires, paginateCables, uid, updateJumperTree } from '../types/cable';
+import { TIP_LIBRARY, WIRE_COLORS, cableHasJumpers, makeCable, makeJumper, makeWires, paginateCables, uid, updateJumperTree } from '../types/cable';
 import SheetA4 from '../components/SheetA4';
 
 const LS_KEY = 'cable-designer-project-v2';
@@ -28,6 +28,7 @@ function migrateProject(parsed: any): Project {
     sideBSensorDesc: '',
     sideBSensorExtra: '',
     markingMode: 'single',
+    jumperNote: '',
     ...c,
   }));
   if (typeof parsed.docNumber !== 'string') parsed.docNumber = '';
@@ -264,7 +265,6 @@ function UpdatePanel() {
 
   return (
     <section className="space-y-2">
-      <h2 className="font-semibold text-sm">Обновления</h2>
       <div>
         <span className={lbl}>Серверная папка с обновлениями</span>
         <input
@@ -312,6 +312,90 @@ function UpdatePanel() {
         </div>
       )}
     </section>
+  );
+}
+
+// Редактор примечания с шаблонами. Шаблоны хранятся в localStorage
+// (общие для всех проектов на этом компьютере), ключ — templatesKey.
+// «+ Примечание» сохраняет текущий текст как новый шаблон,
+// выбор шаблона в списке + «Вставить» — добавляет его текст в примечание.
+function NoteEditor({
+  value,
+  onChange,
+  templatesKey,
+  rows = 3,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  templatesKey: string;
+  rows?: number;
+}) {
+  const [templates, setTemplates] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(templatesKey) || '[]');
+    } catch {
+      return [];
+    }
+  });
+  const [sel, setSel] = useState('');
+
+  const saveTemplates = (list: string[]) => {
+    setTemplates(list);
+    localStorage.setItem(templatesKey, JSON.stringify(list));
+  };
+
+  const addTemplate = () => {
+    const text = value.trim();
+    if (!text || templates.includes(text)) return;
+    saveTemplates([...templates, text]);
+  };
+
+  const insertTemplate = () => {
+    if (!sel) return;
+    onChange(value.trim() ? `${value.trim()}\n${sel}` : sel);
+  };
+
+  const removeTemplate = () => {
+    if (!sel) return;
+    saveTemplates(templates.filter((t) => t !== sel));
+    setSel('');
+  };
+
+  return (
+    <div className="space-y-1">
+      <textarea className={inp} rows={rows} value={value} onChange={(e) => onChange(e.target.value)} />
+      <div className="flex gap-1 items-center flex-wrap">
+        <select className="text-xs flex-1 min-w-24" value={sel} onChange={(e) => setSel(e.target.value)}>
+          <option value="">Шаблон…</option>
+          {templates.map((t, i) => (
+            <option key={i} value={t} title={t}>
+              {t.length > 40 ? t.slice(0, 40) + '…' : t}
+            </option>
+          ))}
+        </select>
+        <button
+          className="text-xs bg-gray-200 rounded px-2 py-1 disabled:opacity-40"
+          disabled={!sel}
+          title="Вставить выбранный шаблон в примечание"
+          onClick={insertTemplate}
+        >
+          Вставить
+        </button>
+        <button
+          className="text-xs bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40"
+          disabled={!value.trim()}
+          title="Сохранить текущий текст примечания как новый шаблон"
+          onClick={addTemplate}
+        >
+          + Примечание
+        </button>
+        {sel && (
+          <button className="text-xs text-red-600" title="Удалить выбранный шаблон" onClick={removeTemplate}>
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -389,6 +473,10 @@ export default function Home() {
 
   // --- Редактор перемычек: какая жила/сторона открыта ---
   const [jumperFocus, setJumperFocus] = useState<{ wireId: string; side: 'A' | 'B' } | null>(null);
+
+  // --- Окно обновлений (открывается из меню Setting → «Обновления…») ---
+  const [updatesOpen, setUpdatesOpen] = useState(false);
+  useEffect(() => window.cableUpdates?.onMenuUpdates(() => setUpdatesOpen(true)), []);
 
   // --- выборочная печать: окно с чекбоксами листов ---
   const totalSheets = paginateCables(project.cables).length + 1; // листы кабелей + перечень
@@ -496,6 +584,19 @@ export default function Home() {
     const c = makeCable(project.cables.length + 1);
     patch({ cables: [...project.cables, c] });
     setActiveId(c.id);
+  };
+
+  // Выбор кабеля по вкладке: активируем и один раз прокручиваем
+  // превью к первому листу этого кабеля.
+  // behavior 'auto': плавный скролл Chromium отменяется ререндером React —
+  // мгновенный переход надёжен.
+  const selectCable = (id: string) => {
+    setActiveId(id);
+    setTimeout(() => {
+      document
+        .getElementById(`sheet-cable-${id}`)
+        ?.scrollIntoView({ behavior: 'auto', block: 'start' });
+    }, 100);
   };
 
   // Полная копия выбранного кабеля: новые id у кабеля, жил, перемычек и столбцов.
@@ -678,14 +779,12 @@ export default function Home() {
             {project.cables.map((c) => (
               <button key={c.id}
                 className={`text-xs rounded px-2 py-1 border ${c.id === cable.id ? 'bg-blue-600 text-white' : 'bg-white'}`}
-                onClick={() => setActiveId(c.id)}>
+                onClick={() => selectCable(c.id)}>
                 {c.designation}
               </button>
             ))}
           </div>
         </section>
-
-        <UpdatePanel />
 
         {cable && (
           <section className="space-y-2">
@@ -799,6 +898,30 @@ export default function Home() {
                     Снять выбор
                   </button>
                 </div>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <span className="text-gray-600">Видимость:</span>
+                  <button
+                    className="text-xs bg-gray-200 rounded px-2 py-0.5"
+                    title="Скрыть выбранные жилы на схеме со стороны А"
+                    onClick={() => bulkPatchWires({ hiddenA: true })}
+                  >
+                    Скрыть на А
+                  </button>
+                  <button
+                    className="text-xs bg-gray-200 rounded px-2 py-0.5"
+                    title="Скрыть выбранные жилы на схеме со стороны Б"
+                    onClick={() => bulkPatchWires({ hiddenB: true })}
+                  >
+                    Скрыть на Б
+                  </button>
+                  <button
+                    className="text-xs bg-gray-200 rounded px-2 py-0.5"
+                    title="Показать выбранные жилы на обеих сторонах"
+                    onClick={() => bulkPatchWires({ hiddenA: false, hiddenB: false })}
+                  >
+                    Показать везде
+                  </button>
+                </div>
               </div>
             )}
 
@@ -827,7 +950,11 @@ export default function Home() {
               </thead>
               <tbody>
                 {cable.wires.slice(0, cable.cores).map((w) => (
-                  <tr key={w.id} className={selWires.has(w.id) ? 'bg-blue-50' : ''}>
+                  <tr
+                    key={w.id}
+                    className={(selWires.has(w.id) ? 'bg-blue-50 ' : '') + ((w.hiddenA || w.hiddenB) ? 'opacity-50' : '')}
+                    title={w.hiddenA && w.hiddenB ? 'Жила скрыта на обеих сторонах' : w.hiddenA ? 'Жила скрыта на стороне А' : w.hiddenB ? 'Жила скрыта на стороне Б' : undefined}
+                  >
                     <td className="border p-0.5 text-center">
                       <input type="checkbox" checked={selWires.has(w.id)} onChange={() => toggleWireSel(w.id)} />
                     </td>
@@ -941,8 +1068,24 @@ export default function Home() {
             ))}
 
             <h3 className="font-semibold text-sm pt-2">Примечания</h3>
-            <textarea className={inp} rows={3} value={cable.note}
-              onChange={(e) => patchCable({ note: e.target.value })} />
+            <NoteEditor
+              value={cable.note}
+              onChange={(v) => patchCable({ note: v })}
+              templatesKey="cable-designer-note-templates-v1"
+            />
+
+            {/* Особое примечание — только если у кабеля есть перемычки */}
+            {cableHasJumpers(cable) && (
+              <>
+                <h3 className="font-semibold text-sm pt-2">Примечание для перемычки</h3>
+                <NoteEditor
+                  value={cable.jumperNote}
+                  onChange={(v) => patchCable({ jumperNote: v })}
+                  templatesKey="cable-designer-jumper-note-templates-v1"
+                  rows={2}
+                />
+              </>
+            )}
           </section>
         )}
 
@@ -1013,6 +1156,25 @@ export default function Home() {
                 </div>
               )}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Окно обновлений: открывается из верхнего меню Setting → «Обновления…» */}
+      {updatesOpen && (
+        <div
+          className="no-print fixed inset-0 z-50 bg-black/40 flex items-start justify-center pt-16"
+          onClick={() => setUpdatesOpen(false)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl p-4 w-[420px] max-w-[90vw] space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-semibold text-sm">Обновления</h2>
+              <button className="text-gray-500 text-sm" onClick={() => setUpdatesOpen(false)}>✕</button>
+            </div>
+            <UpdatePanel />
           </div>
         </div>
       )}

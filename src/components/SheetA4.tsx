@@ -1,5 +1,5 @@
 import type { Cable, Project, Wire } from '../types/cable';
-import { TIP_LIBRARY, WIRE_COLORS, paginateCables } from '../types/cable';
+import { TIP_LIBRARY, WIRE_COLORS, cableHasJumpers, paginateCables } from '../types/cable';
 import CableSvg from './CableSvg';
 
 const tipName = (id: string) => TIP_LIBRARY.find((t) => t.id === id)?.name ?? '—';
@@ -65,6 +65,11 @@ export function CableBlock({
       </div>
       {cable.note && (
         <div style={{ fontSize: '9pt', whiteSpace: 'pre-wrap' }}>Примечание: {cable.note}</div>
+      )}
+      {cableHasJumpers(cable) && cable.jumperNote && (
+        <div style={{ fontSize: '9pt', whiteSpace: 'pre-wrap' }}>
+          Примечание для перемычки: {cable.jumperNote}
+        </div>
       )}
     </div>
   );
@@ -168,7 +173,7 @@ export default function SheetA4({
       // На одном листе ровно 1 CablePage
       const page = pageGroup[0];
       return (
-        <div className="a4-sheet" key={`sheet-${sheetNum}`}>
+        <div className="a4-sheet" key={`sheet-${sheetNum}`} id={`sheet-cable-${page.cable.id}`}>
           <div className="a4-frame">
             <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
               <CableBlock

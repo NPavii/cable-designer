@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const updater = require('./updater.cjs')
@@ -126,6 +126,27 @@ ipcMain.handle('update:apply', async (event, { staging }) => {
 // --- конец блока автообновления ---
 
 app.whenReady().then(() => {
+  // Меню приложения: стандартные вкладки + Setting с автообновлением
+  const menu = Menu.buildFromTemplate([
+    { role: 'fileMenu', label: 'File' },
+    { role: 'editMenu', label: 'Edit' },
+    { role: 'viewMenu', label: 'View' },
+    { role: 'windowMenu', label: 'Window' },
+    {
+      label: 'Setting',
+      submenu: [
+        {
+          label: 'Обновления…',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+            win?.webContents.send('menu:updates')
+          },
+        },
+      ],
+    },
+  ])
+  Menu.setApplicationMenu(menu)
+
   createWindow()
 
   app.on('activate', () => {

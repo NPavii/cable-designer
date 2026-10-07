@@ -18,6 +18,8 @@ declare global {
       >;
       download(): Promise<{ ok: boolean; staging: string }>;
       apply(staging: string): Promise<{ ok: boolean }>;
+      /** Подписка на пункт меню Setting → «Обновления…»; возвращает функцию отписки */
+      onMenuUpdates(cb: () => void): () => void;
     };
     /** Возвращает true, если в проекте есть несохранённые изменения (читает главный процесс при закрытии окна) */
     __cableIsDirty?: () => boolean;

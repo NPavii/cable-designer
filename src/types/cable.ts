@@ -24,6 +24,8 @@ export interface Wire {
   custom?: Record<string, string>;  // значения пользовательских столбцов (по customKey)
   jumpersA?: Jumper[];  // перемычки со стороны А (гирлянда от конца жилы)
   jumpersB?: Jumper[];  // перемычки со стороны Б
+  hiddenA?: boolean;    // жила скрыта на стороне А (не рисуется на схеме)
+  hiddenB?: boolean;    // жила скрыта на стороне Б
 }
 
 /** Режим маркировки: одна на оба конца или своя на каждый конец */
@@ -51,6 +53,7 @@ export interface Cable {
   wires: Wire[];        // длина массива = cores
   columns: TableColumn[];
   note: string;         // примечания
+  jumperNote: string;   // примечание для перемычек (выводится, если у кабеля есть перемычки)
   sideAMode: SideMode;  // сторона А: наконечники или датчик
   sideBMode: SideMode;  // сторона Б: наконечники или датчик
   sideASensorName: string;  // название квадрата датчика, сторона А
@@ -109,10 +112,16 @@ export function jumperLeaves(j: Jumper): number {
 }
 
 /** Сколько вертикальных слотов занимает жила на стороне:
- *  собственный конец + листья всех перемычек */
+ *  собственный конец + листья всех перемычек; скрытая жила — 0 */
 export function wireSlots(w: Wire, side: 'A' | 'B'): number {
+  if (side === 'A' ? w.hiddenA : w.hiddenB) return 0;
   const js = (side === 'A' ? w.jumpersA : w.jumpersB) ?? [];
   return 1 + js.reduce((s, j) => s + jumperLeaves(j), 0);
+}
+
+/** Есть ли у кабеля хоть одна перемычка (на любой стороне) */
+export function cableHasJumpers(c: Cable): boolean {
+  return c.wires.some((w) => (w.jumpersA?.length ?? 0) > 0 || (w.jumpersB?.length ?? 0) > 0);
 }
 
 /** Иммутабельное обновление перемычки по id в дереве гирлянды.
@@ -167,6 +176,7 @@ export function makeCable(n: number): Cable {
       { id: uid(), title: 'Наконечник стор. Б', key: 'tipB' },
     ],
     note: '',
+    jumperNote: '',
     sideAMode: 'tips',
     sideBMode: 'tips',
     sideASensorName: '',
