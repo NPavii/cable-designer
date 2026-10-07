@@ -203,6 +203,118 @@ function JumperList({
   );
 }
 
+// Панель автообновления через серверную папку
+function UpdatePanel() {
+  const [updateDir, setUpdateDir] = useState('');
+  const [savedDir, setSavedDir] = useState('');
+  const [status, setStatus] = useState<'idle' | 'checking' | 'error' | 'uptodate' | 'available' | 'downloading' | 'ready'>('idle');
+  const [info, setInfo] = useState<{ localVersion?: string; remoteVersion?: string; notes?: string; error?: string }>({});
+  const [staging, setStaging] = useState('');
+
+  const api = window.cableUpdates;
+
+  const doCheck = async (dir: string) => {
+    if (!api || !dir) return;
+    setStatus('checking');
+    const r = await api.check();
+    if (!r.ok) {
+      setStatus('error');
+      setInfo({ error: r.error });
+    } else {
+      setInfo({ localVersion: r.localVersion, remoteVersion: r.remoteVersion, notes: r.notes });
+      setStatus(r.hasUpdate ? 'available' : 'uptodate');
+    }
+  };
+
+  // При старте: читаем настройки и молча проверяем обновления
+  useEffect(() => {
+    if (!api) return;
+    api.getSettings().then((s) => {
+      setUpdateDir(s.updateDir);
+      setSavedDir(s.updateDir);
+      if (s.updateDir) doCheck(s.updateDir);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!api) return null;
+
+  const saveDir = async () => {
+    await api.setSettings({ updateDir: updateDir.trim() });
+    setSavedDir(updateDir.trim());
+    if (updateDir.trim()) doCheck(updateDir.trim());
+    else setStatus('idle');
+  };
+
+  const startUpdate = async () => {
+    if (window.__cableIsDirty?.() &&
+        !window.confirm('Есть несохранённые изменения — при обновлении приложение перезапустится. Сначала сохраните проект. Продолжить без сохранения?')) {
+      return;
+    }
+    setStatus('downloading');
+    try {
+      const r = await api.download();
+      setStaging(r.staging);
+      setStatus('ready');
+    } catch (e: any) {
+      setStatus('error');
+      setInfo({ error: 'Не удалось скачать обновление: ' + (e?.message || e) });
+    }
+  };
+
+  return (
+    <section className="space-y-2">
+      <h2 className="font-semibold text-sm">Обновления</h2>
+      <div>
+        <span className={lbl}>Серверная папка с обновлениями</span>
+        <input
+          className={inp}
+          value={updateDir}
+          placeholder="\\\\SERVER\\Обмен\\cable-designer"
+          onChange={(e) => setUpdateDir(e.target.value)}
+          onBlur={saveDir}
+        />
+      </div>
+      <div className="flex gap-1 items-center flex-wrap">
+        <button
+          className="text-sm bg-gray-200 rounded px-2 py-1 disabled:opacity-40"
+          disabled={!savedDir || status === 'checking' || status === 'downloading'}
+          onClick={() => doCheck(savedDir)}
+        >
+          Проверить
+        </button>
+        {status === 'checking' && <span className="text-xs text-gray-500">Проверка…</span>}
+        {status === 'uptodate' && (
+          <span className="text-xs text-green-700">✓ Актуальная версия {info.localVersion}</span>
+        )}
+        {status === 'error' && <span className="text-xs text-red-600">{info.error}</span>}
+        {status === 'downloading' && <span className="text-xs text-gray-500">Скачивание обновления…</span>}
+      </div>
+      {(status === 'available' || status === 'ready') && (
+        <div className="border border-amber-300 bg-amber-50 rounded p-2 space-y-1">
+          <div className="text-xs font-semibold">
+            Доступна версия {info.remoteVersion} (у вас {info.localVersion})
+          </div>
+          {info.notes && <div className="text-xs text-gray-600 whitespace-pre-wrap">{info.notes}</div>}
+          {status === 'available' && (
+            <button className="text-sm bg-amber-500 text-white rounded px-2 py-1" onClick={startUpdate}>
+              Обновить
+            </button>
+          )}
+          {status === 'ready' && (
+            <button
+              className="text-sm bg-green-600 text-white rounded px-2 py-1"
+              onClick={() => api.apply(staging)}
+            >
+              Перезапустить и обновить
+            </button>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function Home() {
   const [project, setProject] = useState<Project>(load);
   const [activeId, setActiveId] = useState<string>(project.cables[0]?.id ?? '');
@@ -572,6 +684,8 @@ export default function Home() {
             ))}
           </div>
         </section>
+
+        <UpdatePanel />
 
         {cable && (
           <section className="space-y-2">

@@ -53,6 +53,14 @@ resources/app/
 - Защита от потери данных: флаг `dirty` в `Home.tsx`, индикатор «не сохранено»,
   confirm при открытии другого файла, системный диалог при закрытии окна
   (главный процесс читает `window.__cableIsDirty()` через `executeJavaScript`).
+- **Автообновление через серверную папку** (`electron/updater.cjs`): приложение
+  сверяет свою версию (`package.json`) с `version.json` в сетевой папке,
+  скачивает robocopy'ем во временную папку и накатывает cmd-скриптом после
+  закрытия. Путь к серверной папке — в `userData/update-settings.json`,
+  задаётся в UI (панель «Обновления»). Публикация новой версии — скриптом
+  `release/publish-update.cmd [\\SERVER\папка] ["что нового"]`, который копирует
+  `cable-designer-win32-x64` в `<сервер>\app\` и пишет `version.json`.
+  Раскладка на сервере: `version.json` + `app\` (полная папка приложения).
 - Автосохранение черновика в `localStorage` (ключ `cable-designer-project-v2`).
 - Печать/экспорт PDF: стили `@media print` в `index.css`.
 

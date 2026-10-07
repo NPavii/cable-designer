@@ -1,11 +1,22 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const updater = require('./updater.cjs')
 
 const FILE_FILTERS = [
   { name: 'Проект кабельного дизайнера (JSON)', extensions: ['json'] },
   { name: 'Все файлы', extensions: ['*'] },
 ]
+
+// Настройки автообновления (путь к серверной папке) — в userData
+const UPDATE_SETTINGS = () => path.join(app.getPath('userData'), 'update-settings.json')
+function readUpdateSettings () {
+  try {
+    return JSON.parse(fs.readFileSync(UPDATE_SETTINGS(), 'utf8'))
+  } catch {
+    return { updateDir: '' }
+  }
+}
 
 function createWindow () {
   const win = new BrowserWindow({
@@ -77,6 +88,39 @@ ipcMain.handle('project:open', async (event) => {
   const content = fs.readFileSync(r.filePaths[0], 'utf8')
   return { canceled: false, path: r.filePaths[0], content }
 })
+
+// --- Автообновление через серверную папку ---
+const APP_ROOT = path.resolve(__dirname, '..') // resources/app
+
+ipcMain.handle('update:getSettings', async () => readUpdateSettings())
+
+ipcMain.handle('update:setSettings', async (event, settings) => {
+  fs.writeFileSync(UPDATE_SETTINGS(), JSON.stringify({ updateDir: settings.updateDir || '' }, null, 2), 'utf8')
+  return { ok: true }
+})
+
+ipcMain.handle('update:check', async () => {
+  const { updateDir } = readUpdateSettings()
+  return updater.check(updateDir, APP_ROOT)
+})
+
+ipcMain.handle('update:download', async () => {
+  const { updateDir } = readUpdateSettings()
+  const staging = await updater.download(updateDir)
+  return { ok: true, staging }
+})
+
+ipcMain.handle('update:apply', async (event, { staging }) => {
+  const exePath = process.execPath
+  const appRoot = path.dirname(exePath) // папка cable-designer-win32-x64
+  updater.applyAndRestart(staging, appRoot, exePath, process.pid)
+  // Даём скрипту стартовать и завершаем приложение
+  setTimeout(() => {
+    app.exit(0)
+  }, 500)
+  return { ok: true }
+})
+// --- конец блока автообновления ---
 
 app.whenReady().then(() => {
   createWindow()
