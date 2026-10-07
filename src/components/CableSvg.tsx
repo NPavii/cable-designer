@@ -176,13 +176,17 @@ export default function CableSvg({
   const markingB = (w: (typeof wires)[number]) =>
     cable.markingMode === 'dual' ? (w.markingB ?? w.marking) : w.marking;
 
-  // Рекурсивная отрисовка перемычек (гирлянды) из точки соединения (x0, y0).
+  // Рекурсивная отрисовка перемычек (гирлянды).
+  // Дуга идёт из точки (xA, yA); концы перемычек — на уровне xLeaf.
   // dir = -1 (сторона А, влево) или 1 (сторона Б, вправо).
   // Концы раскладываются по слотам строго в порядке списка — дуги не пересекаются.
+  // Точка разветвления ставится за GAP до уровня концов — ближе к наконечникам.
+  const GAP = 26;
   const renderJumpers = (
     list: Jumper[],
-    x0: number,
-    y0: number,
+    xA: number,
+    yA: number,
+    xLeaf: number,
     dir: 1 | -1,
     slotStart: number,
     total: number,
@@ -193,30 +197,31 @@ export default function CableSvg({
     let slot = slotStart;
     for (const j of list) {
       const leaves = jumperLeaves(j);
-      const x1 = x0 + dir * LEVEL_W;
-      const dx = Math.max(16, LEVEL_W * 0.6);
+      const dx = Math.max(14, LEVEL_W * 0.5);
       if (j.isJumper && j.chains.length > 0) {
-        // Точка разветвления гирлянды — в центре диапазона слотов её группы
+        // Точка разветвления гирлянды — ближе к наконечникам,
+        // в центре диапазона слотов её группы
+        const xJun = xLeaf + dir * (LEVEL_W - GAP);
+        const xNext = xLeaf + dir * LEVEL_W;
         const y1 = slotCenter(total, slot + leaves / 2 - 0.5);
-        // Собственный конец перемычки — первый слот её группы, на следующем уровне
+        // Собственный конец перемычки — первый слот её группы
         const yOwn = slotCenter(total, slot);
-        const xOwn = x1 + dir * LEVEL_W;
         nodes.push(
           <path
             key={`${keyPrefix}${j.id}`}
-            d={`M ${x0} ${y0} C ${x0 + dir * dx} ${y0}, ${x1 - dir * dx} ${y1}, ${x1} ${y1}`}
+            d={`M ${xA} ${yA} C ${xA + dir * dx} ${yA}, ${xJun - dir * dx} ${y1}, ${xJun} ${y1}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <circle key={`${keyPrefix}${j.id}d`} cx={x1} cy={y1} r={3} fill={color} />,
+          <circle key={`${keyPrefix}${j.id}d`} cx={xJun} cy={y1} r={3} fill={color} />,
           <path
             key={`${keyPrefix}${j.id}o`}
-            d={`M ${x1} ${y1} C ${x1 + dir * dx} ${y1}, ${xOwn - dir * dx} ${yOwn}, ${xOwn} ${yOwn}`}
+            d={`M ${xJun} ${y1} C ${xJun + dir * 12} ${y1}, ${xNext - dir * 12} ${yOwn}, ${xNext} ${yOwn}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <Tip key={`${keyPrefix}${j.id}t`} x={xOwn} y={yOwn} shape={tipOf(j.tip)} side={dir} />,
+          <Tip key={`${keyPrefix}${j.id}t`} x={xNext} y={yOwn} shape={tipOf(j.tip)} side={dir} />,
           <text
             key={`${keyPrefix}${j.id}m`}
-            x={xOwn + dir * 32}
+            x={xNext + dir * 32}
             y={yOwn - 6}
             fontSize={10}
             textAnchor={dir === 1 ? 'start' : 'end'}
@@ -224,20 +229,20 @@ export default function CableSvg({
             {j.marking}
           </text>
         );
-        nodes.push(...renderJumpers(j.chains, x1, y1, dir, slot + 1, total, color, `${keyPrefix}${j.id}_`));
+        nodes.push(...renderJumpers(j.chains, xJun, y1, xNext, dir, slot + 1, total, color, `${keyPrefix}${j.id}_`));
       } else {
         // Обычная перемычка: дуга + наконечник + маркировка
         const y1 = slotCenter(total, slot);
         nodes.push(
           <path
             key={`${keyPrefix}${j.id}`}
-            d={`M ${x0} ${y0} C ${x0 + dir * dx} ${y0}, ${x1 - dir * dx} ${y1}, ${x1} ${y1}`}
+            d={`M ${xA} ${yA} C ${xA + dir * dx} ${yA}, ${xLeaf - dir * dx} ${y1}, ${xLeaf} ${y1}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <Tip key={`${keyPrefix}${j.id}t`} x={x1} y={y1} shape={tipOf(j.tip)} side={dir} />,
+          <Tip key={`${keyPrefix}${j.id}t`} x={xLeaf} y={y1} shape={tipOf(j.tip)} side={dir} />,
           <text
             key={`${keyPrefix}${j.id}m`}
-            x={x1 + dir * 32}
+            x={xLeaf + dir * 32}
             y={y1 - 6}
             fontSize={10}
             textAnchor={dir === 1 ? 'start' : 'end'}
@@ -270,7 +275,8 @@ export default function CableSvg({
       const tip = tipOf(side === 'A' ? w.tipA : w.tipB);
 
       if (js.length === 0) {
-        // Жила без перемычек — как раньше: одна S-кривая + наконечник + маркировка
+        // Жила без перемычек — как раньше: одна S-кривая + наконечник + маркировка.
+        // Маркировка слева — вплотную к наконечнику, по правому краю
         nodes.push(
           <g key={w.id}>
             <path
@@ -282,31 +288,33 @@ export default function CableSvg({
               x={xJ + (side === 'A' ? -30 : 30)}
               y={yJ - 6}
               fontSize={11}
-              textAnchor="start"
+              textAnchor={side === 'A' ? 'end' : 'start'}
             >
               {marking}
             </text>
           </g>
         );
       } else {
-        // Жила с гирляндой: кривая в точку соединения, затем разводка по слотам
+        // Жила с гирляндой: точка соединения ближе к наконечникам (за GAP до их уровня)
         const yOwn = slotCenter(total, slot); // собственный конец — первый слот группы
-        const xOwn = xJ + dir * LEVEL_W;
+        const xLeaf = xJ + dir * LEVEL_W;
+        const xJun = xLeaf - dir * GAP;
+        const dxj = Math.max(24, Math.abs(xBody - xJun) * 0.5);
         nodes.push(
           <g key={w.id}>
             <path
-              d={`M ${xBody} ${cy} C ${xBody - dir * dx} ${cy}, ${xJ + dir * dx} ${yJ}, ${xJ} ${yJ}`}
+              d={`M ${xBody} ${cy} C ${xBody - dir * dxj} ${cy}, ${xJun + dir * dxj} ${yJ}, ${xJun} ${yJ}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
-            <circle cx={xJ} cy={yJ} r={3.5} fill={w.color} />
+            <circle cx={xJun} cy={yJ} r={3.5} fill={w.color} />
             {/* собственный конец жилы */}
             <path
-              d={`M ${xJ} ${yJ} C ${xJ + dir * 20} ${yJ}, ${xOwn - dir * 20} ${yOwn}, ${xOwn} ${yOwn}`}
+              d={`M ${xJun} ${yJ} C ${xJun + dir * 12} ${yJ}, ${xLeaf - dir * 12} ${yOwn}, ${xLeaf} ${yOwn}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
-            <Tip x={xOwn} y={yOwn} shape={tip} side={dir} />
+            <Tip x={xLeaf} y={yOwn} shape={tip} side={dir} />
             <text
-              x={xOwn + dir * 32}
+              x={xLeaf + dir * 32}
               y={yOwn - 6}
               fontSize={11}
               textAnchor={dir === 1 ? 'start' : 'end'}
@@ -314,7 +322,7 @@ export default function CableSvg({
               {marking}
             </text>
             {/* перемычки от точки соединения */}
-            {renderJumpers(js, xJ, yJ, dir, slot + 1, total, w.color, '')}
+            {renderJumpers(js, xJun, yJ, xLeaf, dir, slot + 1, total, w.color, '')}
           </g>
         );
       }
