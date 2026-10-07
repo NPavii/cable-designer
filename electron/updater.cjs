@@ -41,7 +41,9 @@ function robocopy (src, dst) {
   return new Promise((resolve, reject) => {
     execFile(
       'robocopy',
-      [src, dst, '/MIR', '/NFL', '/NDL', '/NJH', '/NJS', '/R:2', '/W:2'],
+      // /COPY:D /DCOPY:D — только данные: сетевые диски (WebDAV и т.п.)
+      // отклоняют запись атрибутов/времени (ERROR 5) и копирование виснет
+      [src, dst, '/MIR', '/COPY:D', '/DCOPY:D', '/NFL', '/NDL', '/NJH', '/NJS', '/R:2', '/W:2'],
       { windowsHide: true },
       (err) => {
         if (err && typeof err.code === 'number' && err.code > 7) {
@@ -94,7 +96,7 @@ function applyAndRestart (staging, appRoot, exePath, pid) {
     '  timeout /t 1 /nobreak >nul',
     '  goto wait',
     ')',
-    `robocopy "${path.join(staging, 'app')}" "${appRoot}" /MIR /NFL /NDL /NJH /NJS /R:3 /W:2 >nul`,
+    `robocopy "${path.join(staging, 'app')}" "${appRoot}" /MIR /COPY:D /DCOPY:D /NFL /NDL /NJH /NJS /R:3 /W:2 >nul`,
     `start "" "${exePath}"`,
     '',
   ]

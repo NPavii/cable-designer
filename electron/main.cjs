@@ -9,12 +9,15 @@ const FILE_FILTERS = [
 ]
 
 // Настройки автообновления (путь к серверной папке) — в userData
+const DEFAULT_UPDATE_DIR = 'Z:\\Документы. Электроника\\Новопашин\\!Kimi\\cable-designer'
 const UPDATE_SETTINGS = () => path.join(app.getPath('userData'), 'update-settings.json')
 function readUpdateSettings () {
   try {
-    return JSON.parse(fs.readFileSync(UPDATE_SETTINGS(), 'utf8'))
+    const s = JSON.parse(fs.readFileSync(UPDATE_SETTINGS(), 'utf8'))
+    // Пустой путь = используем серверную папку по умолчанию
+    return { updateDir: s.updateDir || DEFAULT_UPDATE_DIR }
   } catch {
-    return { updateDir: '' }
+    return { updateDir: DEFAULT_UPDATE_DIR }
   }
 }
 
