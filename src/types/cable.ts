@@ -6,6 +6,14 @@ export interface TipType {
   shape: TipShape;
 }
 
+export interface Jumper {
+  id: string;
+  marking: string;    // собственная маркировка перемычки
+  tip: string;        // id наконечника на конце перемычки
+  isJumper: boolean;  // галочка «перемычка»: из этого провода можно вывести ещё (гирлянда)
+  chains: Jumper[];   // перемычки, выведенные из этой перемычки (при isJumper)
+}
+
 export interface Wire {
   id: string;
   marking: string;    // маркировка (сторона А и, в моно-режиме, сторона Б)
@@ -14,6 +22,8 @@ export interface Wire {
   tipA: string;       // id наконечника, сторона А
   tipB: string;       // id наконечника, сторона Б
   custom?: Record<string, string>;  // значения пользовательских столбцов (по customKey)
+  jumpersA?: Jumper[];  // перемычки со стороны А (гирлянда от конца жилы)
+  jumpersB?: Jumper[];  // перемычки со стороны Б
 }
 
 /** Режим маркировки: одна на оба конца или своя на каждый конец */
@@ -81,6 +91,48 @@ export const WIRE_COLORS = [
 
 let counter = 1;
 export const uid = () => `id_${Date.now().toString(36)}_${counter++}`;
+
+export const makeJumper = (marking = ''): Jumper => ({
+  id: uid(),
+  marking,
+  tip: 'nshvi',
+  isJumper: false,
+  chains: [],
+});
+
+/** Число концевых точек (листьев), которые занимает перемычка на схеме:
+ *  обычная перемычка — 1 точка; точка гирлянды — свой конец + листья цепочки */
+export function jumperLeaves(j: Jumper): number {
+  return j.isJumper && j.chains.length > 0
+    ? 1 + j.chains.reduce((s, c) => s + jumperLeaves(c), 0)
+    : 1;
+}
+
+/** Сколько вертикальных слотов занимает жила на стороне:
+ *  собственный конец + листья всех перемычек */
+export function wireSlots(w: Wire, side: 'A' | 'B'): number {
+  const js = (side === 'A' ? w.jumpersA : w.jumpersB) ?? [];
+  return 1 + js.reduce((s, j) => s + jumperLeaves(j), 0);
+}
+
+/** Иммутабельное обновление перемычки по id в дереве гирлянды.
+ *  fn возвращает обновлённую перемычку или null для удаления. */
+export function updateJumperTree(
+  list: Jumper[],
+  id: string,
+  fn: (j: Jumper) => Jumper | null
+): Jumper[] {
+  const out: Jumper[] = [];
+  for (const j of list) {
+    if (j.id === id) {
+      const r = fn(j);
+      if (r) out.push(r);
+    } else {
+      out.push({ ...j, chains: updateJumperTree(j.chains, id, fn) });
+    }
+  }
+  return out;
+}
 
 export function makeWires(cores: number, prev: Wire[] = []): Wire[] {
   const defaults = ['U', 'V', 'W', 'PE', '1', '2', '3', '4', '5', '6', '7', '8'];

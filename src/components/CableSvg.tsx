@@ -1,5 +1,6 @@
-import type { Cable, TipShape } from '../types/cable';
-import { TIP_LIBRARY } from '../types/cable';
+import type { ReactNode } from 'react';
+import type { Cable, Jumper, TipShape } from '../types/cable';
+import { TIP_LIBRARY, jumperLeaves, wireSlots } from '../types/cable';
 
 // Рисуем наконечник в точке (x,y), направление: side=-1 (влево), side=1 (вправо)
 function Tip({ x, y, shape, side }: { x: number; y: number; shape: TipShape; side: 1 | -1 }) {
@@ -137,15 +138,26 @@ export default function CableSvg({
   const wires = cable.wires.slice(wireStart, wireStart + wireCount);
   const n = Math.max(wires.length, 1);
   const W = width;
-  const spreadStep = 30;         // шаг между жилами (уменьшен для компактности)
+  const spreadStep = 30;         // вертикальный шаг одного слота (жила или конец перемычки)
+  const LEVEL_W = 46;            // горизонтальный шаг на один уровень гирлянды
   const bodyL = W * 0.36;
   const bodyR = W * 0.64;
   const fanL = 70;               // длина развода жил
   const label = `${cable.cores}*${cable.section}`;
 
+  // Сколько вертикальных слотов занимает каждая сторона
+  // (жила = 1 слот + слоты листьев её перемычек; в режиме датчика перемычки не рисуются)
+  const slotsA = wires.reduce((s, w) => s + (cable.sideAMode === 'tips' ? wireSlots(w, 'A') : 1), 0);
+  const slotsB = wires.reduce((s, w) => s + (cable.sideBMode === 'tips' ? wireSlots(w, 'B') : 1), 0);
+  const maxSlots = Math.max(n, slotsA, slotsB);
+
   const spread = (i: number) => (i - (n - 1) / 2) * spreadStep;
-  const H = Math.max(160, n * spreadStep + 50);
+  const H = Math.max(160, maxSlots * spreadStep + 50);
   const cy = H / 2;
+
+  // Центр k-го слота стороны (стороны центрируются независимо)
+  const slotCenter = (total: number, k: number) =>
+    cy - (total * spreadStep) / 2 + (k + 0.5) * spreadStep;
 
   const tipOf = (id: string): TipShape =>
     TIP_LIBRARY.find((t) => t.id === id)?.shape ?? 'none';
@@ -164,28 +176,158 @@ export default function CableSvg({
   const markingB = (w: (typeof wires)[number]) =>
     cable.markingMode === 'dual' ? (w.markingB ?? w.marking) : w.marking;
 
+  // Рекурсивная отрисовка перемычек (гирлянды) из точки соединения (x0, y0).
+  // dir = -1 (сторона А, влево) или 1 (сторона Б, вправо).
+  // Концы раскладываются по слотам строго в порядке списка — дуги не пересекаются.
+  const renderJumpers = (
+    list: Jumper[],
+    x0: number,
+    y0: number,
+    dir: 1 | -1,
+    slotStart: number,
+    total: number,
+    color: string,
+    keyPrefix: string
+  ): ReactNode[] => {
+    const nodes: ReactNode[] = [];
+    let slot = slotStart;
+    for (const j of list) {
+      const leaves = jumperLeaves(j);
+      const x1 = x0 + dir * LEVEL_W;
+      const dx = Math.max(16, LEVEL_W * 0.6);
+      if (j.isJumper && j.chains.length > 0) {
+        // Точка разветвления гирлянды — в центре диапазона слотов её группы
+        const y1 = slotCenter(total, slot + leaves / 2 - 0.5);
+        // Собственный конец перемычки — первый слот её группы, на следующем уровне
+        const yOwn = slotCenter(total, slot);
+        const xOwn = x1 + dir * LEVEL_W;
+        nodes.push(
+          <path
+            key={`${keyPrefix}${j.id}`}
+            d={`M ${x0} ${y0} C ${x0 + dir * dx} ${y0}, ${x1 - dir * dx} ${y1}, ${x1} ${y1}`}
+            stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
+          />,
+          <circle key={`${keyPrefix}${j.id}d`} cx={x1} cy={y1} r={3} fill={color} />,
+          <path
+            key={`${keyPrefix}${j.id}o`}
+            d={`M ${x1} ${y1} C ${x1 + dir * dx} ${y1}, ${xOwn - dir * dx} ${yOwn}, ${xOwn} ${yOwn}`}
+            stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
+          />,
+          <Tip key={`${keyPrefix}${j.id}t`} x={xOwn} y={yOwn} shape={tipOf(j.tip)} side={dir} />,
+          <text
+            key={`${keyPrefix}${j.id}m`}
+            x={xOwn + dir * 32}
+            y={yOwn - 6}
+            fontSize={10}
+            textAnchor={dir === 1 ? 'start' : 'end'}
+          >
+            {j.marking}
+          </text>
+        );
+        nodes.push(...renderJumpers(j.chains, x1, y1, dir, slot + 1, total, color, `${keyPrefix}${j.id}_`));
+      } else {
+        // Обычная перемычка: дуга + наконечник + маркировка
+        const y1 = slotCenter(total, slot);
+        nodes.push(
+          <path
+            key={`${keyPrefix}${j.id}`}
+            d={`M ${x0} ${y0} C ${x0 + dir * dx} ${y0}, ${x1 - dir * dx} ${y1}, ${x1} ${y1}`}
+            stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
+          />,
+          <Tip key={`${keyPrefix}${j.id}t`} x={x1} y={y1} shape={tipOf(j.tip)} side={dir} />,
+          <text
+            key={`${keyPrefix}${j.id}m`}
+            x={x1 + dir * 32}
+            y={y1 - 6}
+            fontSize={10}
+            textAnchor={dir === 1 ? 'start' : 'end'}
+          >
+            {j.marking}
+          </text>
+        );
+      }
+      slot += leaves;
+    }
+    return nodes;
+  };
+
+  // Отрисовка стороны в режиме «Свободные концы» (с учётом перемычек)
+  const renderTipsSide = (side: 'A' | 'B'): ReactNode[] => {
+    const dir: 1 | -1 = side === 'A' ? -1 : 1;
+    const total = side === 'A' ? slotsA : slotsB;
+    const xBody = side === 'A' ? bodyL : bodyR;
+    const xJ = side === 'A' ? bodyL - fanL - 40 + 26 : bodyR + fanL + 40 - 26;
+    const nodes: ReactNode[] = [];
+    let slot = 0;
+
+    for (const w of wires) {
+      const js = (side === 'A' ? w.jumpersA : w.jumpersB) ?? [];
+      const wSlots = wireSlots(w, side);
+      // Точка соединения — в центре диапазона слотов жилы
+      const yJ = slotCenter(total, slot + wSlots / 2 - 0.5);
+      const dx = Math.max(24, Math.abs(xBody - xJ) * 0.5);
+      const marking = side === 'A' ? w.marking : markingB(w);
+      const tip = tipOf(side === 'A' ? w.tipA : w.tipB);
+
+      if (js.length === 0) {
+        // Жила без перемычек — как раньше: одна S-кривая + наконечник + маркировка
+        nodes.push(
+          <g key={w.id}>
+            <path
+              d={`M ${xBody} ${cy} C ${xBody - dir * dx} ${cy}, ${xJ + dir * dx} ${yJ}, ${xJ} ${yJ}`}
+              stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+            />
+            <Tip x={xJ} y={yJ} shape={tip} side={dir} />
+            <text
+              x={xJ + (side === 'A' ? -30 : 30)}
+              y={yJ - 6}
+              fontSize={11}
+              textAnchor="start"
+            >
+              {marking}
+            </text>
+          </g>
+        );
+      } else {
+        // Жила с гирляндой: кривая в точку соединения, затем разводка по слотам
+        const yOwn = slotCenter(total, slot); // собственный конец — первый слот группы
+        const xOwn = xJ + dir * LEVEL_W;
+        nodes.push(
+          <g key={w.id}>
+            <path
+              d={`M ${xBody} ${cy} C ${xBody - dir * dx} ${cy}, ${xJ + dir * dx} ${yJ}, ${xJ} ${yJ}`}
+              stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+            />
+            <circle cx={xJ} cy={yJ} r={3.5} fill={w.color} />
+            {/* собственный конец жилы */}
+            <path
+              d={`M ${xJ} ${yJ} C ${xJ + dir * 20} ${yJ}, ${xOwn - dir * 20} ${yOwn}, ${xOwn} ${yOwn}`}
+              stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
+            />
+            <Tip x={xOwn} y={yOwn} shape={tip} side={dir} />
+            <text
+              x={xOwn + dir * 32}
+              y={yOwn - 6}
+              fontSize={11}
+              textAnchor={dir === 1 ? 'start' : 'end'}
+            >
+              {marking}
+            </text>
+            {/* перемычки от точки соединения */}
+            {renderJumpers(js, xJ, yJ, dir, slot + 1, total, w.color, '')}
+          </g>
+        );
+      }
+      slot += wSlots;
+    }
+    return nodes;
+  };
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ fontFamily: 'Arial, sans-serif' }}>
       {/* Сторона А (слева) */}
       {cable.sideAMode === 'tips' ? (
-        // Свободные концы с наконечниками
-        wires.map((w, i) => {
-          const y = cy + spread(i);
-          const xEnd = bodyL - fanL - 40;
-          const xTip = xEnd + 26;
-          // Плавная S-кривая: горизонтальные касательные на выходе из кабеля и у наконечника
-          const dx = Math.max(24, (bodyL - xTip) * 0.5);
-          return (
-            <g key={w.id}>
-              <path
-                d={`M ${bodyL} ${cy} C ${bodyL - dx} ${cy}, ${xTip + dx} ${y}, ${xTip} ${y}`}
-                stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
-              />
-              <Tip x={xTip} y={y} shape={tipOf(w.tipA)} side={-1} />
-              <text x={xEnd - 4} y={y - 6} fontSize={11} textAnchor="start">{w.marking}</text>
-            </g>
-          );
-        })
+        renderTipsSide('A')
       ) : (
         // Датчик слева — провода плавно заходят внутрь прямоугольника
         <>
@@ -226,23 +368,7 @@ export default function CableSvg({
 
       {/* Сторона Б (справа) */}
       {cable.sideBMode === 'tips' ? (
-        // Свободные концы с наконечниками
-        wires.map((w, i) => {
-          const y = cy + spread(i);
-          const xEnd = bodyR + fanL + 40;
-          const xTip = xEnd - 26;
-          const dx = Math.max(24, (xTip - bodyR) * 0.5);
-          return (
-            <g key={w.id}>
-              <path
-                d={`M ${bodyR} ${cy} C ${bodyR + dx} ${cy}, ${xTip - dx} ${y}, ${xTip} ${y}`}
-                stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
-              />
-              <Tip x={xTip} y={y} shape={tipOf(w.tipB)} side={1} />
-              <text x={xEnd + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
-            </g>
-          );
-        })
+        renderTipsSide('B')
       ) : (
         // Датчик справа — провода плавно заходят внутрь прямоугольника
         <>

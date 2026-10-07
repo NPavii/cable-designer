@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Cable, Project, SideMode, Wire } from '../types/cable';
-import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeWires, paginateCables, uid } from '../types/cable';
+import type { Cable, Jumper, Project, SideMode, Wire } from '../types/cable';
+import { TIP_LIBRARY, WIRE_COLORS, makeCable, makeJumper, makeWires, paginateCables, uid, updateJumperTree } from '../types/cable';
 import SheetA4 from '../components/SheetA4';
 
 const LS_KEY = 'cable-designer-project-v2';
@@ -123,6 +123,86 @@ function SideEditor({
   );
 }
 
+// Рекурсивный редактор перемычек (гирлянды). Тоже на уровне модуля — иначе
+// поля ввода теряли бы фокус при каждом рендере.
+function JumperList({
+  items,
+  onChange,
+  depth,
+}: {
+  items: Jumper[];
+  onChange: (l: Jumper[]) => void;
+  depth: number;
+}) {
+  return (
+    <div className="space-y-1" style={{ marginLeft: depth * 18 }}>
+      {items.map((j) => (
+        <div key={j.id} className="space-y-1">
+          <div className="flex gap-1 items-center flex-wrap">
+            <span className="text-gray-400 text-xs select-none">⟿</span>
+            <input
+              className="w-20 text-xs px-1 border border-gray-300 rounded"
+              value={j.marking}
+              placeholder="Марк."
+              onChange={(e) =>
+                onChange(updateJumperTree(items, j.id, (x) => ({ ...x, marking: e.target.value })))
+              }
+            />
+            <select
+              className="text-xs"
+              value={j.tip}
+              onChange={(e) =>
+                onChange(updateJumperTree(items, j.id, (x) => ({ ...x, tip: e.target.value })))
+              }
+            >
+              {TIP_LIBRARY.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1 text-xs cursor-pointer" title="Из этого провода можно вывести ещё перемычки (гирлянда)">
+              <input
+                type="checkbox"
+                checked={j.isJumper}
+                onChange={(e) =>
+                  onChange(updateJumperTree(items, j.id, (x) => ({ ...x, isJumper: e.target.checked })))
+                }
+              />
+              перемычка
+            </label>
+            {j.isJumper && (
+              <button
+                className="text-xs bg-gray-200 rounded px-1.5"
+                title="Добавить перемычку из этого провода"
+                onClick={() =>
+                  onChange(updateJumperTree(items, j.id, (x) => ({ ...x, chains: [...x.chains, makeJumper()] })))
+                }
+              >
+                +
+              </button>
+            )}
+            <button
+              className="text-red-600 text-xs"
+              title="Удалить перемычку (со всей цепочкой)"
+              onClick={() => onChange(updateJumperTree(items, j.id, () => null))}
+            >
+              ✕
+            </button>
+          </div>
+          {j.isJumper && j.chains.length > 0 && (
+            <JumperList
+              items={j.chains}
+              depth={depth + 1}
+              onChange={(l) =>
+                onChange(updateJumperTree(items, j.id, (x) => ({ ...x, chains: l })))
+              }
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
   const [project, setProject] = useState<Project>(load);
   const [activeId, setActiveId] = useState<string>(project.cables[0]?.id ?? '');
@@ -141,6 +221,62 @@ export default function Home() {
     window.__cableIsDirty = () => dirtyRef.current;
     return () => { delete window.__cableIsDirty; };
   }, []);
+
+  // --- История изменений: Undo (Ctrl+Z) / Redo (Ctrl+Y, Ctrl+Shift+Z) ---
+  const pastRef = useRef<Project[]>([]);
+  const futureRef = useRef<Project[]>([]);
+  const [histTick, setHistTick] = useState(0); // для перерисовки кнопок ↶/↷
+
+  // Все изменения проекта идут через commit: снапшот в историю, потом setProject
+  const commit = (up: (pr: Project) => Project) => {
+    pastRef.current.push(project);
+    if (pastRef.current.length > 100) pastRef.current.shift();
+    futureRef.current = [];
+    setHistTick((t) => t + 1);
+    setProject(up);
+  };
+
+  const undo = () => {
+    setProject((pr) => {
+      const prev = pastRef.current.pop();
+      if (!prev) return pr;
+      futureRef.current.push(pr);
+      return prev;
+    });
+    setHistTick((t) => t + 1);
+  };
+
+  const redo = () => {
+    setProject((pr) => {
+      const next = futureRef.current.pop();
+      if (!next) return pr;
+      pastRef.current.push(pr);
+      return next;
+    });
+    setHistTick((t) => t + 1);
+  };
+
+  // Горячие клавиши. В полях ввода Ctrl+Z не перехватываем — там работает
+  // штатная отмена текста браузера.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (k === 'y' || (k === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- Массовые операции с жилами: выбор чекбоксами ---
+  const [selWires, setSelWires] = useState<Set<string>>(new Set());
+
+  // --- Редактор перемычек: какая жила/сторона открыта ---
+  const [jumperFocus, setJumperFocus] = useState<{ wireId: string; side: 'A' | 'B' } | null>(null);
 
   // --- выборочная печать: окно с чекбоксами листов ---
   const totalSheets = paginateCables(project.cables).length + 1; // листы кабелей + перечень
@@ -203,14 +339,41 @@ export default function Home() {
     [project, activeId]
   );
 
-  const patch = (p: Partial<Project>) => setProject((pr) => ({ ...pr, ...p }));
+  const patch = (p: Partial<Project>) => commit((pr) => ({ ...pr, ...p }));
   const patchCable = (p: Partial<Cable>) =>
-    setProject((pr) => ({
+    commit((pr) => ({
       ...pr,
       cables: pr.cables.map((c) => (c.id === cable.id ? { ...c, ...p } : c)),
     }));
   const patchWire = (wid: string, p: Partial<Wire>) =>
     patchCable({ wires: cable.wires.map((w) => (w.id === wid ? { ...w, ...p } : w)) });
+
+  // При смене кабеля сбрасываем выбор жил и редактор перемычек
+  useEffect(() => {
+    setSelWires(new Set());
+    setJumperFocus(null);
+  }, [activeId]);
+
+  // Массовое изменение выбранных жил
+  const bulkPatchWires = (p: Partial<Wire>) =>
+    patchCable({ wires: cable.wires.map((w) => (selWires.has(w.id) ? { ...w, ...p } : w)) });
+
+  const toggleWireSel = (wid: string) =>
+    setSelWires((s) => {
+      const n = new Set(s);
+      if (n.has(wid)) n.delete(wid);
+      else n.add(wid);
+      return n;
+    });
+
+  const pageWireIds = cable ? cable.wires.slice(0, cable.cores).map((w) => w.id) : [];
+  const allSelected = pageWireIds.length > 0 && pageWireIds.every((id) => selWires.has(id));
+  const toggleAllWires = () =>
+    setSelWires(allSelected ? new Set() : new Set(pageWireIds));
+
+  const focusedJumperWire = jumperFocus
+    ? cable.wires.find((w) => w.id === jumperFocus.wireId)
+    : undefined;
 
   const setCores = (n: number) => {
     const cores = Math.max(1, Math.min(24, n));
@@ -223,14 +386,21 @@ export default function Home() {
     setActiveId(c.id);
   };
 
-  // Полная копия выбранного кабеля: новые id у кабеля, жил и столбцов.
+  // Полная копия выбранного кабеля: новые id у кабеля, жил, перемычек и столбцов.
   // customKey столбцов сохраняем — по ним привязаны значения жил (wire.custom).
   const duplicateCable = () => {
     if (!cable) return;
     const copy: Cable = JSON.parse(JSON.stringify(cable));
     copy.id = uid();
     copy.designation = `${cable.designation} (копия)`;
-    copy.wires = copy.wires.map((w) => ({ ...w, id: uid() }));
+    const regenJumpers = (js?: Jumper[]): Jumper[] | undefined =>
+      js?.map((j) => ({ ...j, id: uid(), chains: regenJumpers(j.chains) ?? [] }));
+    copy.wires = copy.wires.map((w) => ({
+      ...w,
+      id: uid(),
+      jumpersA: regenJumpers(w.jumpersA),
+      jumpersB: regenJumpers(w.jumpersB),
+    }));
     copy.columns = copy.columns.map((c) => ({ ...c, id: uid() }));
     const idx = project.cables.findIndex((c) => c.id === cable.id);
     const cables = [...project.cables];
@@ -250,6 +420,9 @@ export default function Home() {
     try {
       const p = migrateProject(JSON.parse(content));
       suppressDirty.current = true; // загрузка файла — не изменение
+      pastRef.current = []; // история отмены привязана к старому проекту — очищаем
+      futureRef.current = [];
+      setHistTick((t) => t + 1);
       setProject(p);
       setActiveId(p.cables[0]?.id ?? '');
       setFilePath(path);
@@ -325,7 +498,27 @@ export default function Home() {
         className="shrink-0 overflow-y-auto border-r p-4 space-y-4 no-print bg-gray-50"
         style={{ width: panelW }}
       >
-        <h1 className="text-lg font-bold">Конструктор кабелей</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-bold">Конструктор кабелей</h1>
+          <div className="flex gap-1" key={histTick}>
+            <button
+              className="text-sm bg-gray-200 rounded px-2 py-1 disabled:opacity-40"
+              disabled={pastRef.current.length === 0}
+              title="Отменить (Ctrl+Z)"
+              onClick={undo}
+            >
+              ↶
+            </button>
+            <button
+              className="text-sm bg-gray-200 rounded px-2 py-1 disabled:opacity-40"
+              disabled={futureRef.current.length === 0}
+              title="Повторить (Ctrl+Y)"
+              onClick={redo}
+            >
+              ↷
+            </button>
+          </div>
+        </div>
 
         <section className="space-y-2">
           <h2 className="font-semibold text-sm">Документ</h2>
@@ -443,9 +636,64 @@ export default function Home() {
             </div>
 
             <h3 className="font-semibold text-sm pt-2">Жилы и наконечники</h3>
+
+            {/* Панель массовых операций — видна, когда выбрана хотя бы одна жила */}
+            {selWires.size > 0 && (
+              <div className="border rounded p-2 bg-blue-50 space-y-1 text-xs">
+                <div className="font-semibold">Выбрано жил: {selWires.size}</div>
+                <div className="flex gap-2 items-center flex-wrap">
+                  <label className="flex items-center gap-1">
+                    Цвет:
+                    <select
+                      className="text-xs"
+                      value=""
+                      onChange={(e) => { if (e.target.value) bulkPatchWires({ color: e.target.value }); }}
+                    >
+                      <option value="">—</option>
+                      {WIRE_COLORS.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1">
+                    Стор. А:
+                    <select
+                      className="text-xs"
+                      value=""
+                      onChange={(e) => { if (e.target.value) bulkPatchWires({ tipA: e.target.value }); }}
+                    >
+                      <option value="">—</option>
+                      {TIP_LIBRARY.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1">
+                    Стор. Б:
+                    <select
+                      className="text-xs"
+                      value=""
+                      onChange={(e) => { if (e.target.value) bulkPatchWires({ tipB: e.target.value }); }}
+                    >
+                      <option value="">—</option>
+                      {TIP_LIBRARY.map((t) => (
+                        <option key={t.id} value={t.id}>{t.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <button className="text-gray-600 underline" onClick={() => setSelWires(new Set())}>
+                    Снять выбор
+                  </button>
+                </div>
+              </div>
+            )}
+
             <table className="w-full text-xs border">
               <thead>
                 <tr className="bg-gray-100">
+                  <th className="border p-1" title="Выбрать все жилы">
+                    <input type="checkbox" checked={allSelected} onChange={toggleAllWires} />
+                  </th>
                   {cable.markingMode === 'dual' ? (
                     <>
                       <th className="border p-1">Марк. А</th>
@@ -457,6 +705,7 @@ export default function Home() {
                   <th className="border p-1">Цвет</th>
                   <th className="border p-1">Стор. А</th>
                   <th className="border p-1">Стор. Б</th>
+                  <th className="border p-1" title="Перемычки от конца жилы (сторона А / Б)">Перем.</th>
                   {cable.columns.filter((c) => c.key === 'custom').map((c) => (
                     <th key={c.id} className="border p-1">{c.title}</th>
                   ))}
@@ -464,7 +713,10 @@ export default function Home() {
               </thead>
               <tbody>
                 {cable.wires.slice(0, cable.cores).map((w) => (
-                  <tr key={w.id}>
+                  <tr key={w.id} className={selWires.has(w.id) ? 'bg-blue-50' : ''}>
+                    <td className="border p-0.5 text-center">
+                      <input type="checkbox" checked={selWires.has(w.id)} onChange={() => toggleWireSel(w.id)} />
+                    </td>
                     {cable.markingMode === 'dual' ? (
                       <>
                         <td className="border p-0.5">
@@ -496,6 +748,22 @@ export default function Home() {
                           ))}
                         </select></td>
                     ))}
+                    <td className="border p-0.5 whitespace-nowrap text-center">
+                      {(['A', 'B'] as const).map((s) => {
+                        const count = (s === 'A' ? w.jumpersA : w.jumpersB)?.length ?? 0;
+                        const active = jumperFocus?.wireId === w.id && jumperFocus.side === s;
+                        return (
+                          <button
+                            key={s}
+                            className={`text-xs rounded px-1 ${active ? 'bg-blue-600 text-white' : count ? 'bg-amber-200' : 'bg-gray-100'}`}
+                            title={`Перемычки, сторона ${s}${count ? ` (${count})` : ''}`}
+                            onClick={() => setJumperFocus(active ? null : { wireId: w.id, side: s })}
+                          >
+                            {s}{count ? `:${count}` : ''}
+                          </button>
+                        );
+                      })}
+                    </td>
                     {cable.columns.filter((c) => c.key === 'custom').map((c) => (
                       <td key={c.id} className="border p-0.5">
                         <input className="w-16 text-xs px-1" value={w.custom?.[c.customKey ?? ''] ?? ''}
@@ -507,6 +775,39 @@ export default function Home() {
                 ))}
               </tbody>
             </table>
+
+            {/* Редактор перемычек выбранной жилы */}
+            {jumperFocus && focusedJumperWire && (
+              <div className="border rounded p-2 bg-white space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-xs">
+                    Перемычки: жила «{jumperFocus.side === 'A' ? focusedJumperWire.marking : (cable.markingMode === 'dual' ? (focusedJumperWire.markingB ?? focusedJumperWire.marking) : focusedJumperWire.marking)}»,
+                    сторона {jumperFocus.side}
+                  </div>
+                  <button className="text-gray-500 text-xs" onClick={() => setJumperFocus(null)}>✕</button>
+                </div>
+                {(() => {
+                  const key = jumperFocus.side === 'A' ? 'jumpersA' : 'jumpersB';
+                  const items = focusedJumperWire[key] ?? [];
+                  const setItems = (l: Jumper[]) => patchWire(focusedJumperWire.id, { [key]: l } as any);
+                  return (
+                    <>
+                      <JumperList items={items} depth={0} onChange={setItems} />
+                      <button
+                        className="text-xs bg-gray-200 rounded px-2 py-1"
+                        onClick={() => setItems([...items, makeJumper()])}
+                      >
+                        + Добавить перемычку
+                      </button>
+                    </>
+                  );
+                })()}
+                <p className="text-xs text-gray-500">
+                  У перемычки своя маркировка и наконечник. Галочка «перемычка» превращает провод
+                  в точку разветвления — из него можно вывести ещё перемычки (гирлянда).
+                </p>
+              </div>
+            )}
 
             <div className="flex items-center justify-between pt-2">
               <h3 className="font-semibold text-sm">Столбцы таблицы</h3>
