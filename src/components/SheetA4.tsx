@@ -7,14 +7,17 @@ const tipName = (id: string) => TIP_LIBRARY.find((t) => t.id === id)?.name ?? '�
 function cellValue(w: Wire, idx: number, key: string, markingMode: 'single' | 'dual') {
   switch (key) {
     case 'num': return String(idx + 1);
-    case 'marking':
-      // Двойная маркировка: в одном столбце показываем обе — «А / Б»
-      return markingMode === 'dual'
-        ? `${w.marking} / ${w.markingB ?? w.marking}`
-        : w.marking;
+    case 'marking': {
+      if (w.hiddenA && w.hiddenB) return '—';
+      // Двойная маркировка: скрытый конец явно обозначаем прочерком.
+      if (markingMode === 'dual') {
+        return `${w.hiddenA ? '—' : w.marking} / ${w.hiddenB ? '—' : (w.markingB ?? w.marking)}`;
+      }
+      return w.marking;
+    }
     case 'color': return WIRE_COLORS.find((c) => c.id === w.color)?.name ?? w.color;
-    case 'tipA': return tipName(w.tipA);
-    case 'tipB': return tipName(w.tipB);
+    case 'tipA': return w.hiddenA ? '—' : tipName(w.tipA);
+    case 'tipB': return w.hiddenB ? '—' : tipName(w.tipB);
     default: return (w as any).custom?.[key] ?? '';
   }
 }
@@ -23,21 +26,24 @@ export function CableBlock({
   cable,
   wireStart = 0,
   wireCount = cable.cores,
+  animated = false,
 }: {
   cable: Cable;
   wireStart?: number;
   wireCount?: number;
+  animated?: boolean;
 }) {
   const wires = cable.wires.slice(wireStart, wireStart + wireCount);
+  const visibleColumns = cable.columns.filter((c) => !c.hidden);
   return (
     <div style={{ marginBottom: '3mm' }}>
       <div style={{ border: '1px solid #000', padding: '1mm' }}>
-        <CableSvg cable={cable} width={720} wireStart={wireStart} wireCount={wireCount} />
+        <CableSvg cable={cable} width={720} wireStart={wireStart} wireCount={wireCount} animated={animated} />
       </div>
       <table className="gost-table">
         <thead>
           <tr>
-            {cable.columns.map((c) => (
+            {visibleColumns.map((c) => (
               <th key={c.id}>{
                 c.key === 'marking' && cable.markingMode === 'dual'
                   ? 'Маркировка А / Б'
@@ -49,7 +55,7 @@ export function CableBlock({
         <tbody>
           {wires.map((w, i) => (
             <tr key={w.id}>
-              {cable.columns.map((c) => (
+              {visibleColumns.map((c) => (
                 <td key={c.id}>{cellValue(w, wireStart + i, c.key === 'custom' ? c.customKey ?? '' : c.key, cable.markingMode)}</td>
               ))}
             </tr>
@@ -85,15 +91,17 @@ function SummarySheet({
   sheetNum,
   totalSheets,
   docNumber,
+  sheetId,
 }: {
   cables: Cable[];
   startIdx: number;
   sheetNum: number;
   totalSheets: number;
   docNumber: string;
+  sheetId: string;
 }) {
   return (
-    <div className="a4-sheet">
+    <div className="a4-sheet" id={sheetId}>
       <div className="a4-frame">
         <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
           <div style={{ textAlign: 'center', fontSize: '14pt', fontWeight: 'bold', marginBottom: '4mm' }}>
@@ -154,11 +162,13 @@ export default function SheetA4({
   project,
   cables,
   renderWrap,
+  animated = false,
 }: {
   project: Project;
   cables: Cable[];
   /** Опциональная обёртка каждого листа (например, карточка с чекбоксом выбора) */
   renderWrap?: (node: React.ReactElement, sheetIdx: number, total: number) => React.ReactElement;
+  animated?: boolean;
 }) {
   const sheets = paginateCables(cables);
   const summarySheets: Cable[][] = [];
@@ -173,13 +183,14 @@ export default function SheetA4({
       // На одном листе ровно 1 CablePage
       const page = pageGroup[0];
       return (
-        <div className="a4-sheet" key={`sheet-${sheetNum}`} id={`sheet-cable-${page.cable.id}`}>
+        <div className="a4-sheet" key={`sheet-${sheetNum}`} id={`sheet-cable-${page.cable.id}-page-${page.pageNum}`}>
           <div className="a4-frame">
             <div style={{ padding: '3mm 5mm 18mm 5mm' }}>
               <CableBlock
                 cable={page.cable}
                 wireStart={page.wireStart}
                 wireCount={page.wireCount}
+                animated={animated}
               />
             </div>
 
@@ -216,6 +227,7 @@ export default function SheetA4({
         sheetNum={sheets.length + i + 1}
         totalSheets={totalSheets}
         docNumber={project.docNumber}
+        sheetId={`sheet-summary-${i}`}
       />
     )),
   ];

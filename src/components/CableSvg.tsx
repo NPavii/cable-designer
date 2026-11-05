@@ -1,9 +1,111 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { ReactNode, SVGProps } from 'react';
 import type { Cable, Jumper, TipShape } from '../types/cable';
 import { TIP_LIBRARY, jumperLeaves, wireSlots } from '../types/cable';
 
+/** Лёгкая пружинная модель для SVG: координаты кривой догоняют новую
+ *  раскладку с инерцией и затуханием. Подходит технической схеме лучше
+ *  полноценного physics engine — не влияет на геометрию печати. */
+function AnimatedPath({ d, animate = false, ...props }: SVGProps<SVGPathElement> & { animate?: boolean }) {
+  const target = String(d ?? '');
+  const [current, setCurrent] = useState(target);
+  const currentRef = useRef(target);
+  const velocityRef = useRef<number[]>([]);
+  const frameRef = useRef(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(frameRef.current);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const from = currentRef.current.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+    const to = target.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi)?.map(Number) ?? [];
+    if (!animate || reduceMotion || from.length !== to.length || from.length === 0) {
+      currentRef.current = target;
+      velocityRef.current = [];
+      setCurrent(target);
+      return;
+    }
+
+    const start = performance.now();
+    const tick = (now: number) => {
+      // Фиксированный шаг общий для кривой, наконечника и узла:
+      // независимые часы давали небольшое расхождение на промежуточных кадрах.
+      const dt = 1 / 60;
+      const stiffness = 190;
+      const damping = 25;
+      const values = to.map((end, i) => {
+        const value = from[i];
+        const velocity = (velocityRef.current[i] ?? 0) + ((end - value) * stiffness - (velocityRef.current[i] ?? 0) * damping) * dt;
+        velocityRef.current[i] = velocity;
+        return value + velocity * dt;
+      });
+      let index = 0;
+      const next = target.replace(/-?\d*\.?\d+(?:e[-+]?\d+)?/gi, () => String(values[index++] ?? 0));
+      from.splice(0, from.length, ...values);
+      currentRef.current = next;
+      setCurrent(next);
+      const settled = values.every((v, i) => Math.abs(v - to[i]) < 0.02 && Math.abs(velocityRef.current[i]) < 0.05);
+      if (!settled && now - start < 1800) frameRef.current = requestAnimationFrame(tick);
+      else {
+        currentRef.current = target;
+        setCurrent(target);
+      }
+    };
+    frameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameRef.current);
+  }, [target, animate]);
+
+  return <path {...props} d={current} />;
+}
+
+/** Та же пружина для присоединённых элементов. Наконечник и конец кривой
+ *  используют одинаковые параметры, поэтому не расходятся во время движения. */
+function useSpringNumber(target: number, animate: boolean): number {
+  const [current, setCurrent] = useState(target);
+  const currentRef = useRef(target);
+  const velocityRef = useRef(0);
+  const frameRef = useRef(0);
+
+  useEffect(() => {
+    cancelAnimationFrame(frameRef.current);
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (!animate || reduceMotion) {
+      currentRef.current = target;
+      velocityRef.current = 0;
+      setCurrent(target);
+      return;
+    }
+    const start = performance.now();
+    const tick = (now: number) => {
+      // Фиксированный шаг общий для кривой, наконечника и узла:
+      // независимые часы давали небольшое расхождение на промежуточных кадрах.
+      const dt = 1 / 60;
+      const velocity = velocityRef.current + ((target - currentRef.current) * 190 - velocityRef.current * 25) * dt;
+      velocityRef.current = velocity;
+      currentRef.current += velocity * dt;
+      setCurrent(currentRef.current);
+      const settled = Math.abs(currentRef.current - target) < 0.02 && Math.abs(velocity) < 0.05;
+      if (!settled && now - start < 1800) frameRef.current = requestAnimationFrame(tick);
+      else {
+        currentRef.current = target;
+        velocityRef.current = 0;
+        setCurrent(target);
+      }
+    };
+    frameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameRef.current);
+  }, [target, animate]);
+
+  return current;
+}
+
+function AnimatedCircle({ cy, animate = false, ...props }: SVGProps<SVGCircleElement> & { animate?: boolean }) {
+  const springCy = useSpringNumber(Number(cy ?? 0), animate);
+  return <circle {...props} cy={springCy} />;
+}
+
 // Рисуем наконечник в точке (x,y), направление: side=-1 (влево), side=1 (вправо)
-function Tip({ x, y, shape, side }: { x: number; y: number; shape: TipShape; side: 1 | -1 }) {
+function Tip({ x, y: targetY, shape, side, animate = false }: { x: number; y: number; shape: TipShape; side: 1 | -1; animate?: boolean }) {
+  const y = useSpringNumber(targetY, animate);
   const s = side; // направление «наружу»
   const stroke = '#111';
   const common = { stroke, strokeWidth: 1.2, fill: 'white' };
@@ -90,7 +192,7 @@ function SensorLabel({
         strokeWidth={5}
         paintOrder="stroke"
       >
-        {name || 'Датчик'}
+        {name || 'Квадрат'}
       </text>
       <text
         x={textX}
@@ -127,6 +229,8 @@ export interface CableSvgProps {
   width?: number;
   wireStart?: number;
   wireCount?: number;
+  /** Плавная экранная анимация; на печати всегда статичная схема. */
+  animated?: boolean;
 }
 
 export default function CableSvg({
@@ -134,11 +238,11 @@ export default function CableSvg({
   width = 760,
   wireStart = 0,
   wireCount = cable.cores,
+  animated = false,
 }: CableSvgProps) {
   const wires = cable.wires.slice(wireStart, wireStart + wireCount);
   const n = Math.max(wires.length, 1);
   const W = width;
-  const spreadStep = 30;         // вертикальный шаг одного слота (жила или конец перемычки)
   const LEVEL_W = 46;            // горизонтальный шаг на один уровень гирлянды
   const bodyL = W * 0.36;
   const bodyR = W * 0.64;
@@ -151,9 +255,13 @@ export default function CableSvg({
   const slotsA = wires.reduce((s, w) => s + (cable.sideAMode === 'tips' ? wireSlots(w, 'A') : (w.hiddenA ? 0 : 1)), 0);
   const slotsB = wires.reduce((s, w) => s + (cable.sideBMode === 'tips' ? wireSlots(w, 'B') : (w.hiddenB ? 0 : 1)), 0);
   const maxSlots = Math.max(1, n, slotsA, slotsB);
+  // На одном листе до 24 жил: при большой плотности уменьшаем вертикальный шаг,
+  // сохраняя кабель и таблицу в пределах печатной страницы.
+  const spreadStep = maxSlots > 16 ? Math.max(12, Math.min(24, 480 / maxSlots)) : 30;
 
   const H = Math.max(160, maxSlots * spreadStep + 50);
   const cy = H / 2;
+  const springCy = useSpringNumber(cy, animated);
 
   // Центр k-го слота стороны (стороны центрируются независимо)
   const slotCenter = (total: number, k: number) =>
@@ -207,18 +315,20 @@ export default function CableSvg({
         // Собственный конец перемычки — первый слот её группы
         const yOwn = slotCenter(total, slot);
         nodes.push(
-          <path
+          <AnimatedPath
+            animate={animated}
             key={`${keyPrefix}${j.id}`}
             d={`M ${xA} ${yA} C ${xA + dir * dx} ${yA}, ${xJun - dir * dx} ${y1}, ${xJun} ${y1}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <circle key={`${keyPrefix}${j.id}d`} cx={xJun} cy={y1} r={3} fill={color} />,
-          <path
+          <AnimatedCircle animate={animated} key={`${keyPrefix}${j.id}d`} cx={xJun} cy={y1} r={3} fill={color} />,
+          <AnimatedPath
+            animate={animated}
             key={`${keyPrefix}${j.id}o`}
             d={`M ${xJun} ${y1} C ${xJun + dir * 12} ${y1}, ${xNext - dir * 12} ${yOwn}, ${xNext} ${yOwn}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <Tip key={`${keyPrefix}${j.id}t`} x={xNext} y={yOwn} shape={tipOf(j.tip)} side={dir} />,
+          <Tip animate={animated} key={`${keyPrefix}${j.id}t`} x={xNext} y={yOwn} shape={tipOf(j.tip)} side={dir} />,
           <text
             key={`${keyPrefix}${j.id}m`}
             x={xNext + dir * 32}
@@ -234,12 +344,13 @@ export default function CableSvg({
         // Обычная перемычка: дуга + наконечник + маркировка
         const y1 = slotCenter(total, slot);
         nodes.push(
-          <path
+          <AnimatedPath
+            animate={animated}
             key={`${keyPrefix}${j.id}`}
             d={`M ${xA} ${yA} C ${xA + dir * dx} ${yA}, ${xLeaf - dir * dx} ${y1}, ${xLeaf} ${y1}`}
             stroke={color} strokeWidth={2.5} fill="none" strokeLinecap="round"
           />,
-          <Tip key={`${keyPrefix}${j.id}t`} x={xLeaf} y={y1} shape={tipOf(j.tip)} side={dir} />,
+          <Tip animate={animated} key={`${keyPrefix}${j.id}t`} x={xLeaf} y={y1} shape={tipOf(j.tip)} side={dir} />,
           <text
             key={`${keyPrefix}${j.id}m`}
             x={xLeaf + dir * 32}
@@ -281,11 +392,12 @@ export default function CableSvg({
         // Маркировка слева — вплотную к наконечнику, по правому краю
         nodes.push(
           <g key={w.id}>
-            <path
+            <AnimatedPath
+              animate={animated}
               d={`M ${xBody} ${cy} C ${xBody - dir * dx} ${cy}, ${xJ + dir * dx} ${yJ}, ${xJ} ${yJ}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
-            <Tip x={xJ} y={yJ} shape={tip} side={dir} />
+            <Tip animate={animated} x={xJ} y={yJ} shape={tip} side={dir} />
             <text
               x={xJ + (side === 'A' ? -30 : 30)}
               y={yJ - 6}
@@ -304,17 +416,19 @@ export default function CableSvg({
         const dxj = Math.max(24, Math.abs(xBody - xJun) * 0.5);
         nodes.push(
           <g key={w.id}>
-            <path
+            <AnimatedPath
+              animate={animated}
               d={`M ${xBody} ${cy} C ${xBody - dir * dxj} ${cy}, ${xJun + dir * dxj} ${yJ}, ${xJun} ${yJ}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
-            <circle cx={xJun} cy={yJ} r={3.5} fill={w.color} />
+            <AnimatedCircle animate={animated} cx={xJun} cy={yJ} r={3.5} fill={w.color} />
             {/* собственный конец жилы */}
-            <path
+            <AnimatedPath
+              animate={animated}
               d={`M ${xJun} ${yJ} C ${xJun + dir * 12} ${yJ}, ${xLeaf - dir * 12} ${yOwn}, ${xLeaf} ${yOwn}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
-            <Tip x={xLeaf} y={yOwn} shape={tip} side={dir} />
+            <Tip animate={animated} x={xLeaf} y={yOwn} shape={tip} side={dir} />
             <text
               x={xLeaf + dir * 32}
               y={yOwn - 6}
@@ -343,7 +457,7 @@ export default function CableSvg({
         <>
           <SensorBox
             x={sensorAX}
-            y={cy}
+            y={springCy}
             width={sensorW}
             height={sensorH}
             side={-1}
@@ -355,7 +469,8 @@ export default function CableSvg({
             const dx = Math.max(24, (bodyL - lineEndX) * 0.45);
             return (
               <g key={w.id}>
-                <path
+                <AnimatedPath
+                  animate={animated}
                   d={`M ${bodyL} ${cy} C ${bodyL - dx} ${cy}, ${lineEndX + dx} ${y}, ${lineEndX} ${y}`}
                   stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
@@ -366,7 +481,7 @@ export default function CableSvg({
           {/* Подписи датчика поверх проводов */}
           <SensorLabel
             x={sensorAX}
-            y={cy}
+            y={springCy}
             width={sensorW}
             name={cable.sideASensorName}
             desc={cable.sideASensorDesc}
@@ -384,7 +499,7 @@ export default function CableSvg({
         <>
           <SensorBox
             x={sensorBX}
-            y={cy}
+            y={springCy}
             width={sensorW}
             height={sensorH}
             side={1}
@@ -395,7 +510,8 @@ export default function CableSvg({
             const dx = Math.max(24, (lineEndX - bodyR) * 0.45);
             return (
               <g key={w.id}>
-                <path
+                <AnimatedPath
+                  animate={animated}
                   d={`M ${bodyR} ${cy} C ${bodyR + dx} ${cy}, ${lineEndX - dx} ${y}, ${lineEndX} ${y}`}
                   stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
@@ -406,7 +522,7 @@ export default function CableSvg({
           {/* Подписи датчика поверх проводов */}
           <SensorLabel
             x={sensorBX}
-            y={cy}
+            y={springCy}
             width={sensorW}
             name={cable.sideBSensorName}
             desc={cable.sideBSensorDesc}
@@ -416,21 +532,21 @@ export default function CableSvg({
         </>
       )}
 
-      {/* тело кабеля: жирный жгут — толстая основа + обводка, провода уходят под оболочку */}
-      <line x1={bodyL} y1={cy} x2={bodyR} y2={cy} stroke="#e8e8e8" strokeWidth={16} strokeLinecap="round" />
-      <line x1={bodyL} y1={cy - 8} x2={bodyR} y2={cy - 8} stroke="#111" strokeWidth={2.2} />
-      <line x1={bodyL} y1={cy + 8} x2={bodyR} y2={cy + 8} stroke="#111" strokeWidth={2.2} />
-      {/* маркировка кабеля */}
-      <text x={W / 2} y={cy - 12} fontSize={14} textAnchor="middle">{label}</text>
-      {/* размер длины */}
-      <g stroke="#111" strokeWidth={1}>
-        <line x1={bodyL} y1={cy + 16} x2={bodyL} y2={cy + 30} />
-        <line x1={bodyR} y1={cy + 16} x2={bodyR} y2={cy + 30} />
-        <line x1={bodyL} y1={cy + 24} x2={bodyR} y2={cy + 24} />
-        <path d={`M ${bodyL} ${cy + 24} l 9 -3 v 6 z`} fill="#111" />
-        <path d={`M ${bodyR} ${cy + 24} l -9 -3 v 6 z`} fill="#111" />
+      {/* Тело и размерная линия движутся синхронно с началами проводов. */}
+      <g transform={`translate(0 ${springCy - cy})`}>
+        <line x1={bodyL} y1={cy} x2={bodyR} y2={cy} stroke="#e8e8e8" strokeWidth={16} strokeLinecap="round" />
+        <line x1={bodyL} y1={cy - 8} x2={bodyR} y2={cy - 8} stroke="#111" strokeWidth={2.2} />
+        <line x1={bodyL} y1={cy + 8} x2={bodyR} y2={cy + 8} stroke="#111" strokeWidth={2.2} />
+        <text x={W / 2} y={cy - 12} fontSize={14} textAnchor="middle">{label}</text>
+        <g stroke="#111" strokeWidth={1}>
+          <line x1={bodyL} y1={cy + 16} x2={bodyL} y2={cy + 30} />
+          <line x1={bodyR} y1={cy + 16} x2={bodyR} y2={cy + 30} />
+          <line x1={bodyL} y1={cy + 24} x2={bodyR} y2={cy + 24} />
+          <path d={`M ${bodyL} ${cy + 24} l 9 -3 v 6 z`} fill="#111" />
+          <path d={`M ${bodyR} ${cy + 24} l -9 -3 v 6 z`} fill="#111" />
+        </g>
+        <text x={W / 2} y={cy + 40} fontSize={13} textAnchor="middle">L = {cable.lengthMm} мм</text>
       </g>
-      <text x={W / 2} y={cy + 40} fontSize={13} textAnchor="middle">L = {cable.lengthMm} мм</text>
     </svg>
   );
 }

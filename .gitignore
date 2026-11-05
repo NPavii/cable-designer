@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+.smoke-profile
+.update-test
+smoke-result.png
 release
 _push_*.txt
 _batch_*

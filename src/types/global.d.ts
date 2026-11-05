@@ -2,22 +2,38 @@ export {};
 
 declare global {
   interface Window {
+    /** Независимое окно проекта и идентификатор его локального черновика. */
+    cableWindow?: { id: string };
     /** API работы с файлами проекта, предоставляется Electron preload (electron/preload.cjs) */
     cableFiles?: {
       saveAs(defaultPath: string, content: string): Promise<{ canceled: boolean; path?: string }>;
       save(path: string, content: string): Promise<{ ok: boolean }>;
       open(): Promise<{ canceled: boolean; path?: string; content?: string }>;
+      onMenuCommand(cb: (command: 'new' | 'open' | 'save' | 'saveAs' | 'undo' | 'redo') => void): () => void;
+    };
+    /** Перенос и управление библиотекой шаблонов примечаний. */
+    cableTemplates?: {
+      export(defaultPath: string, content: string): Promise<{ canceled: boolean; path?: string }>;
+      import(): Promise<{ canceled: boolean; path?: string; content?: string }>;
+      onMenu(cb: () => void): () => void;
+    };
+    /** Рабочая папка файловых диалогов проекта и шаблонов. */
+    cableSettings?: {
+      get(): Promise<{ updateDir: string; defaultDir: string }>;
+      chooseDefaultDir(): Promise<{ canceled: boolean; path?: string }>;
+      setDefaultDir(defaultDir: string): Promise<{ ok: boolean; error?: string }>;
+      onMenu(cb: () => void): () => void;
     };
     /** API автообновления через серверную папку */
     cableUpdates?: {
-      getSettings(): Promise<{ updateDir: string }>;
+      getSettings(): Promise<{ updateDir: string; defaultDir?: string }>;
       setSettings(s: { updateDir: string }): Promise<{ ok: boolean }>;
       check(): Promise<
         | { ok: true; hasUpdate: boolean; localVersion: string; remoteVersion: string; notes: string }
         | { ok: false; error: string }
       >;
       download(): Promise<{ ok: boolean; staging: string }>;
-      apply(staging: string): Promise<{ ok: boolean }>;
+      apply(staging: string): Promise<{ ok: boolean; error?: string }>;
       /** Подписка на пункт меню Setting → «Обновления…»; возвращает функцию отписки */
       onMenuUpdates(cb: () => void): () => void;
     };

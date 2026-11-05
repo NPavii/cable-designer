@@ -77,16 +77,38 @@ async function check (updateDir, appPath) {
   }
 }
 
-// Скачивание новой версии во временную папку
+// Скачивание новой версии во временную папку с проверкой целостности пакета.
 async function download (updateDir) {
+  const manifest = readJson(path.join(updateDir, 'version.json'))
+  if (!manifest?.version) throw new Error('Серверный version.json повреждён')
+  const serverApp = path.join(updateDir, 'app')
+  if (!fs.existsSync(path.join(serverApp, 'cable-designer.exe'))) {
+    throw new Error('На сервере отсутствует app/cable-designer.exe')
+  }
+  const serverPackage = readJson(path.join(serverApp, 'resources', 'app', 'package.json'))
+  if (serverPackage?.version !== manifest.version) {
+    throw new Error('Версия пакета на сервере не совпадает с version.json. Опубликуйте обновление ещё раз.')
+  }
   const staging = fs.mkdtempSync(path.join(os.tmpdir(), 'cable-designer-update-'))
-  await robocopy(path.join(updateDir, 'app'), path.join(staging, 'app'))
-  return staging
+  try {
+    await robocopy(serverApp, path.join(staging, 'app'))
+    const downloadedPackage = readJson(path.join(staging, 'app', 'resources', 'app', 'package.json'))
+    if (downloadedPackage?.version !== manifest.version || !fs.existsSync(path.join(staging, 'app', 'cable-designer.exe'))) {
+      throw new Error('Скачанный пакет не прошёл проверку целостности')
+    }
+    return staging
+  } catch (error) {
+    fs.rmSync(staging, { recursive: true, force: true })
+    throw error
+  }
 }
 
 // Применение: cmd-скрипт ждёт завершения процесса, накатывает файлы, перезапускает.
 // Вызывающая сторона после этого должна завершить приложение (app.quit()).
 function applyAndRestart (staging, appRoot, exePath, pid) {
+  if (!fs.existsSync(path.join(staging, 'app', 'cable-designer.exe')) || !fs.existsSync(path.join(staging, 'app', 'resources', 'app', 'package.json'))) {
+    throw new Error('Пакет обновления повреждён: установка отменена')
+  }
   const scriptPath = path.join(staging, 'apply-update.cmd')
   const lines = [
     '@echo off',
@@ -97,6 +119,11 @@ function applyAndRestart (staging, appRoot, exePath, pid) {
     '  goto wait',
     ')',
     `robocopy "${path.join(staging, 'app')}" "${appRoot}" /MIR /COPY:D /DCOPY:D /NFL /NDL /NJH /NJS /R:3 /W:2 >nul`,
+    'if errorlevel 8 (',
+    '  echo Update failed> "%TEMP%\\cable-designer-update-error.log"',
+    `  start "" "${exePath}"`,
+    '  exit /b 1',
+    ')',
     `start "" "${exePath}"`,
     '',
   ]

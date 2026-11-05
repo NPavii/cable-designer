@@ -38,12 +38,14 @@ export interface TableColumn {
   title: string;
   key: ColumnKey;      // 'custom' — произвольный текст
   customKey?: string;  // для custom: ключ в wire.custom
+  hidden?: boolean;    // скрыт на печатном листе (данные сохраняются)
 }
 
 export type SideMode = 'tips' | 'sensor';
 
 export interface Cable {
   id: string;
+  folderId?: string | null; // папка в дереве страниц; null/отсутствует — корень
   designation: string;  // обозначение, например «АНК 601Н-45 01 00»
   name: string;         // наименование, например «Отвод короба (XS4)»
   cores: number;        // количество жил
@@ -64,9 +66,15 @@ export interface Cable {
   sideBSensorExtra: string; // дополнительно: особенности датчика, сторона Б
 }
 
+export interface ProjectFolder {
+  id: string;
+  name: string;
+}
+
 export interface Project {
   docNumber: string;   // АНК 601Н-45 00 00 МЭ
   cables: Cable[];
+  folders: ProjectFolder[]; // пользовательская структура дерева страниц
 }
 
 export const TIP_LIBRARY: TipType[] = [
@@ -189,7 +197,7 @@ export function makeCable(n: number): Cable {
 }
 
 /** Максимальное количество жил на одном листе А4 */
-export const MAX_WIRES_PER_SHEET = 16;
+export const MAX_WIRES_PER_SHEET = 24; // один кабель — один лист
 
 /** Разбивает кабель на страницы (каждая страница — часть кабеля для одного листа А4) */
 export interface CablePage {
