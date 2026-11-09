@@ -1,6 +1,8 @@
-const { app, BrowserWindow, Menu, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, Menu, ipcMain, dialog, protocol, net, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { randomUUID } = require('crypto')
+const { pathToFileURL } = require('url')
 const updater = require('./updater.cjs')
 
 const FILE_FILTERS = [
@@ -11,6 +13,78 @@ const TEMPLATE_FILTERS = [
   { name: 'Библиотека шаблонов (JSON)', extensions: ['json'] },
   { name: 'Все файлы', extensions: ['*'] },
 ]
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.avif'])
+const TEMPLATE_ASSETS_DIR = () => path.join(app.getPath('userData'), 'template-assets')
+const isImageFile = (name) => IMAGE_EXTENSIONS.has(path.extname(name).toLowerCase())
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'cable-asset', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+])
+
+function assetNameFromUrl (value) {
+  try {
+    const url = new URL(String(value))
+    if (url.protocol !== 'cable-asset:') return null
+    const name = decodeURIComponent(url.hostname)
+    if (!name || path.basename(name) !== name || !/^[\w.-]+$/i.test(name)) return null
+    return name
+  } catch {
+    return null
+  }
+}
+
+function saveTemplateAsset (sourcePath, originalName) {
+  fs.mkdirSync(TEMPLATE_ASSETS_DIR(), { recursive: true })
+  const extension = path.extname(originalName).slice(0, 16)
+  const name = `${randomUUID()}${extension}`
+  fs.copyFileSync(sourcePath, path.join(TEMPLATE_ASSETS_DIR(), name))
+  return { name: originalName, url: `cable-asset://${name}`, image: isImageFile(originalName), size: fs.statSync(sourcePath).size }
+}
+
+function saveTemplateAssetBuffer (originalName, data) {
+  fs.mkdirSync(TEMPLATE_ASSETS_DIR(), { recursive: true })
+  const extension = path.extname(originalName).slice(0, 16)
+  const name = `${randomUUID()}${extension}`
+  const buffer = Buffer.from(data)
+  fs.writeFileSync(path.join(TEMPLATE_ASSETS_DIR(), name), buffer)
+  return { name: originalName, url: `cable-asset://${name}`, image: isImageFile(originalName), size: buffer.length }
+}
+
+// Экспорт упаковывает сами файлы, чтобы cable-asset-ссылки работали и на другом ПК.
+function packTemplateAssets (content) {
+  const parsed = JSON.parse(content)
+  const assets = {}
+  const text = JSON.stringify(parsed.templates || {})
+  for (const match of text.matchAll(/cable-asset:\/\/([\w.-]+)/gi)) {
+    const name = assetNameFromUrl(match[0])
+    if (!name || assets[name]) continue
+    const filePath = path.join(TEMPLATE_ASSETS_DIR(), name)
+    if (fs.existsSync(filePath)) assets[name] = { data: fs.readFileSync(filePath).toString('base64') }
+  }
+  return JSON.stringify({ ...parsed, version: 2, assets }, null, 2)
+}
+
+function unpackTemplateAssets (content) {
+  const parsed = JSON.parse(content)
+  if (parsed?.app !== 'cable-designer-templates' || !parsed.templates) throw new Error('invalid templates file')
+  if (!parsed.assets || typeof parsed.assets !== 'object') return content
+  fs.mkdirSync(TEMPLATE_ASSETS_DIR(), { recursive: true })
+  const replacements = new Map()
+  for (const [oldName, payload] of Object.entries(parsed.assets)) {
+    if (!/^[\w.-]+$/i.test(oldName) || typeof payload?.data !== 'string') continue
+    const data = Buffer.from(payload.data, 'base64')
+    let name = oldName
+    const existing = path.join(TEMPLATE_ASSETS_DIR(), name)
+    if (fs.existsSync(existing) && !fs.readFileSync(existing).equals(data)) name = `${randomUUID()}${path.extname(oldName)}`
+    fs.writeFileSync(path.join(TEMPLATE_ASSETS_DIR(), name), data)
+    replacements.set(oldName, name)
+  }
+  let templates = JSON.stringify(parsed.templates)
+  for (const [oldName, name] of replacements) templates = templates.split(`cable-asset://${oldName}`).join(`cable-asset://${name}`)
+  parsed.templates = JSON.parse(templates)
+  delete parsed.assets
+  return JSON.stringify(parsed)
+}
 
 // Настройки автообновления (путь к серверной папке) — в userData
 const DEFAULT_UPDATE_DIR = 'Z:\\Документы. Электроника\\Новопашин\\!Kimi\\cable-designer'
@@ -28,14 +102,16 @@ function readUpdateSettings () {
 
 let windowCounter = 0
 
-function createWindow () {
-  // У каждого окна свой идентификатор и свой черновик в localStorage.
-  const isMain = BrowserWindow.getAllWindows().length === 0
-  const windowId = isMain ? 'main' : `project-${Date.now()}-${++windowCounter}`
+function createWindow (templateEditor = null) {
+  // У каждого окна свой идентификатор; редактор шаблона использует общую библиотеку.
+  const isMain = !templateEditor && BrowserWindow.getAllWindows().length === 0
+  const windowId = templateEditor
+    ? `template-${Date.now()}-${++windowCounter}`
+    : isMain ? 'main' : `project-${Date.now()}-${++windowCounter}`
   const win = new BrowserWindow({
-    width: 1400,
-    height: 900,
-    title: 'Кабельный дизайнер',
+    width: templateEditor ? 1280 : 1400,
+    height: templateEditor ? 860 : 900,
+    title: templateEditor ? 'Редактор шаблона — Кабельный дизайнер' : 'Кабельный дизайнер',
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -44,7 +120,10 @@ function createWindow () {
     }
   })
 
-  win.loadFile(path.join(__dirname, '../dist/index.html'), { query: { windowId } })
+  const query = templateEditor
+    ? { windowId, templateEditor: '1', kind: templateEditor.kind, index: String(templateEditor.index) }
+    : { windowId }
+  win.loadFile(path.join(__dirname, '../dist/index.html'), { query })
 
   // Защита от потери несохранённых изменений при закрытии окна
   let allowClose = false
@@ -65,8 +144,10 @@ function createWindow () {
           defaultId: 1,
           cancelId: 1,
           title: 'Несохранённые изменения',
-          message: 'В проекте есть несохранённые изменения.',
-          detail: 'Закрыть приложение без сохранения? Чтобы сохранить проект, нажмите «Отмена» и воспользуйтесь кнопкой «Сохранить».',
+          message: templateEditor ? 'В шаблоне есть несохранённые изменения.' : 'В проекте есть несохранённые изменения.',
+          detail: templateEditor
+            ? 'Закрыть редактор без сохранения? Нажмите «Отмена», чтобы вернуться и сохранить шаблон.'
+            : 'Закрыть приложение без сохранения? Чтобы сохранить проект, нажмите «Отмена» и воспользуйтесь кнопкой «Сохранить».',
         })
         if (r.response === 0) {
           allowClose = true
@@ -109,12 +190,12 @@ ipcMain.handle('project:open', async (event) => {
   return { canceled: false, path: r.filePaths[0], content }
 })
 
-// Перенос библиотеки шаблонов между компьютерами.
+// Перенос библиотеки шаблонов между компьютерами вместе с вложениями.
 ipcMain.handle('templates:export', async (event, { defaultPath, content }) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   const r = await dialog.showSaveDialog(win, { defaultPath: withDefaultDir(defaultPath), filters: TEMPLATE_FILTERS })
   if (r.canceled || !r.filePath) return { canceled: true }
-  fs.writeFileSync(r.filePath, content, 'utf8')
+  fs.writeFileSync(r.filePath, packTemplateAssets(content), 'utf8')
   return { canceled: false, path: r.filePath }
 })
 
@@ -122,8 +203,44 @@ ipcMain.handle('templates:import', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   const r = await dialog.showOpenDialog(win, { defaultPath: readUpdateSettings().defaultDir || undefined, properties: ['openFile'], filters: TEMPLATE_FILTERS })
   if (r.canceled || !r.filePaths[0]) return { canceled: true }
-  const content = fs.readFileSync(r.filePaths[0], 'utf8')
+  const content = unpackTemplateAssets(fs.readFileSync(r.filePaths[0], 'utf8'))
   return { canceled: false, path: r.filePaths[0], content }
+})
+
+ipcMain.handle('template-assets:choose', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const r = await dialog.showOpenDialog(win, {
+    defaultPath: readUpdateSettings().defaultDir || undefined,
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Документы, изображения и другие файлы', extensions: ['*'] }],
+  })
+  if (r.canceled || !r.filePaths.length) return { canceled: true, files: [] }
+  return { canceled: false, files: r.filePaths.map((filePath) => saveTemplateAsset(filePath, path.basename(filePath))) }
+})
+
+ipcMain.handle('template-assets:saveBuffer', async (event, { name, data }) => {
+  const safeName = path.basename(String(name || 'screenshot.png'))
+  return saveTemplateAssetBuffer(safeName, data)
+})
+
+ipcMain.handle('template-assets:open', async (event, value) => {
+  const url = String(value || '')
+  if (/^https?:\/\//i.test(url)) {
+    await shell.openExternal(url)
+    return { ok: true }
+  }
+  const name = assetNameFromUrl(url)
+  if (!name) return { ok: false, error: 'Некорректная ссылка на вложение' }
+  const filePath = path.join(TEMPLATE_ASSETS_DIR(), name)
+  if (!fs.existsSync(filePath)) return { ok: false, error: 'Файл вложения не найден' }
+  const error = await shell.openPath(filePath)
+  return error ? { ok: false, error } : { ok: true }
+})
+
+ipcMain.handle('template-editor:open', async (event, { kind, index }) => {
+  if (!['note', 'jumper'].includes(kind) || !Number.isInteger(index) || index < 0) throw new Error('invalid template')
+  createWindow({ kind, index })
+  return { ok: true }
 })
 
 ipcMain.handle('settings:get', async () => readUpdateSettings())
@@ -186,6 +303,14 @@ ipcMain.handle('update:apply', async (event, { staging }) => {
 // --- конец блока автообновления ---
 
 app.whenReady().then(() => {
+  protocol.handle('cable-asset', (request) => {
+    const name = assetNameFromUrl(request.url)
+    if (!name) return new Response('Invalid asset URL', { status: 400 })
+    const filePath = path.join(TEMPLATE_ASSETS_DIR(), name)
+    if (!fs.existsSync(filePath)) return new Response('Asset not found', { status: 404 })
+    return net.fetch(pathToFileURL(filePath).toString())
+  })
+
   // Файловые команды выполняет редактор: там находятся защита от потери
   // изменений, сериализация и история Undo/Redo.
   const sendFileCommand = (command) => {

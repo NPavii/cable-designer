@@ -1,6 +1,7 @@
 import type { Cable, Project, Wire } from '../types/cable';
 import { TIP_LIBRARY, WIRE_COLORS, cableHasJumpers, paginateCables } from '../types/cable';
 import CableSvg from './CableSvg';
+import MarkdownView from './MarkdownView';
 
 const tipName = (id: string) => TIP_LIBRARY.find((t) => t.id === id)?.name ?? '—';
 
@@ -70,11 +71,15 @@ export function CableBlock({
         )}
       </div>
       {cable.note && (
-        <div style={{ fontSize: '9pt', whiteSpace: 'pre-wrap' }}>Примечание: {cable.note}</div>
+        <div className="sheet-note">
+          <b>Примечание:</b>
+          <MarkdownView value={cable.note} />
+        </div>
       )}
       {cableHasJumpers(cable) && cable.jumperNote && (
-        <div style={{ fontSize: '9pt', whiteSpace: 'pre-wrap' }}>
-          Примечание для перемычки: {cable.jumperNote}
+        <div className="sheet-note">
+          <b>Примечание для перемычки:</b>
+          <MarkdownView value={cable.jumperNote} />
         </div>
       )}
     </div>

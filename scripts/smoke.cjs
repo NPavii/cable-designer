@@ -101,7 +101,7 @@ function button(text) {
     await evaluate('document.activeElement?.blur()');
     await sleep(800);
     await cdp('Page.bringToFront');
-    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'n', code: 'KeyN', windowsVirtualKeyCode: 78, nativeVirtualKeyCode: 78, modifiers: 2 });
+    await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'n', code: 'KeyN', windowsVirtualKeyCode: 78, nativeVirtualKeyCode: 78, modifiers: 2 });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'n', code: 'KeyN', windowsVirtualKeyCode: 78, nativeVirtualKeyCode: 78, modifiers: 2 });
     let secondPage;
     for (let i = 0; i < 40; i++) {

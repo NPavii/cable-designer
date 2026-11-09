@@ -1274,9 +1274,10 @@ export default function Home() {
         onContextAction={handleTreeAction}
       />
 
-      {/* Окно «Выбрать и печатать»: предпросмотр листов с чекбоксами */}
+      {/* Окно «Выбрать и печатать»: на экране — только миниатюры. */}
       {selOpen && (
-        <div className="sel-root">
+        <>
+        <div className="sel-root no-print">
           <div className="sel-bar no-print">
             <div>
               <div className="text-sm font-medium text-white">Листы для печати</div>
@@ -1315,6 +1316,17 @@ export default function Home() {
             />
           </div>
         </div>
+        {/* Печать формируется из полноразмерных листов, а не из миниатюр 42 %. */}
+        <div className="sel-print-root print-only" aria-hidden="true">
+          <SheetA4
+            project={project}
+            cables={project.cables}
+            renderWrap={(node, idx) => (
+              <div key={idx} className={'sel-print-card' + (selPages.has(idx) ? '' : ' sheet-skip')}>{node}</div>
+            )}
+          />
+        </div>
+        </>
       )}
 
       {templatesOpen && <TemplateManager onClose={() => setTemplatesOpen(false)} />}

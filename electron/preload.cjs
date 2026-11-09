@@ -31,6 +31,13 @@ contextBridge.exposeInMainWorld('cableTemplates', {
   },
 })
 
+contextBridge.exposeInMainWorld('cableTemplateAssets', {
+  choose: () => ipcRenderer.invoke('template-assets:choose'),
+  saveBuffer: (name, data) => ipcRenderer.invoke('template-assets:saveBuffer', { name, data }),
+  open: (url) => ipcRenderer.invoke('template-assets:open', url),
+  openEditor: (kind, index) => ipcRenderer.invoke('template-editor:open', { kind, index }),
+})
+
 contextBridge.exposeInMainWorld('cableSettings', {
   get: () => ipcRenderer.invoke('settings:get'),
   chooseDefaultDir: () => ipcRenderer.invoke('settings:chooseDefaultDir'),

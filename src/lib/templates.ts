@@ -23,14 +23,21 @@ export function writeTemplates(kind: TemplateKind, templates: string[]) {
 }
 
 export function onTemplatesChanged(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key && Object.values(TEMPLATE_KEYS).includes(event.key)) listener();
+  };
   window.addEventListener(CHANGED_EVENT, listener);
-  return () => window.removeEventListener(CHANGED_EVENT, listener);
+  window.addEventListener('storage', onStorage);
+  return () => {
+    window.removeEventListener(CHANGED_EVENT, listener);
+    window.removeEventListener('storage', onStorage);
+  };
 }
 
 export function templatesToJson(): string {
   return JSON.stringify({
     app: 'cable-designer-templates',
-    version: 1,
+    version: 2,
     templates: {
       note: readTemplates('note'),
       jumper: readTemplates('jumper'),
@@ -41,7 +48,7 @@ export function templatesToJson(): string {
 /** Импорт объединяет библиотеки и удаляет дубли, не затирая шаблоны пользователя. */
 export function importTemplates(content: string): { note: number; jumper: number } {
   const parsed = JSON.parse(content);
-  if (parsed?.app !== 'cable-designer-templates' || parsed?.version !== 1 || !parsed.templates) {
+  if (parsed?.app !== 'cable-designer-templates' || ![1, 2].includes(parsed?.version) || !parsed.templates) {
     throw new Error('invalid templates file');
   }
   const added = { note: 0, jumper: 0 };

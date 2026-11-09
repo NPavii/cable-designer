@@ -527,28 +527,29 @@ export default function CableSvg({
           strokeWidth={1.5}
         />
         {visible.map((w, i) => {
-          // Смещение на полшага убирает горизонтальные траектории через соседние контакты.
-          const angle = -Math.PI / 2 + ((i + 0.5) * Math.PI * 2) / visible.length;
+          // Полшага между контактами + поворот разъёма на 20° разводит подходы.
+          const baseAngle = -Math.PI / 2 + ((i + 0.5) * Math.PI * 2) / visible.length;
+          const angle = baseAngle + (20 * Math.PI) / 180;
           const cos = Math.cos(angle);
           const sin = Math.sin(angle);
           const contactX = centerX + (radius - contactDepth) * cos;
           const contactY = cy + (radius - contactDepth) * sin;
-          // Старты повторяют положение контактов на торце в двух осях.
-          // Даже симметричные пары не имеют общей начальной точки.
+          // Старты и контакты повернуты согласованно и не имеют общих точек.
           const startX = xBody + cos * 7;
           const startY = cy + sin * 7;
           const nearBody = side === 'A' ? cos > 0.2 : cos < -0.2;
           const labelRadius = radius + (visible.length > 12 && i % 2 ? 25 : 16);
           const labelX = centerX + labelRadius * cos;
           // На стороне кабеля сдвигаем подпись по вертикали с радиальной линии провода.
-          const labelY = cy + labelRadius * sin + (nearBody ? (sin > 0 ? 24 : -24) : 0);
-          // Плавная S-кривая: обе контрольные точки строго между торцом и контактом,
-          // поэтому провод красиво изгибается, но не образует петлю у подключения.
+          const labelY = cy + labelRadius * sin + (nearBody ? (sin > 0 ? 38 : -38) : 0);
+          // Пологая S-кривая сохраняет порядок соседних проводов по всей длине.
+          // Контрольные точки остаются между торцом и контактом, без петель.
           const spanX = Math.abs(startX - contactX);
+          const spanY = contactY - startY;
           const control1X = startX + dir * spanX * 0.45;
           const control2X = contactX - dir * spanX * 0.45;
-          const control1Y = startY;
-          const control2Y = contactY;
+          const control1Y = startY + spanY * 0.12;
+          const control2Y = startY + spanY * 0.88;
           const anchor = cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
           return (
             <g key={w.id} data-contact={w.id}>

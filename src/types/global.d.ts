@@ -17,6 +17,13 @@ declare global {
       import(): Promise<{ canceled: boolean; path?: string; content?: string }>;
       onMenu(cb: () => void): () => void;
     };
+    /** Файлы шаблонов, изображения и отдельные окна Markdown-редактора. */
+    cableTemplateAssets?: {
+      choose(): Promise<{ canceled: boolean; files: Array<{ name: string; url: string; image: boolean; size: number }> }>;
+      saveBuffer(name: string, data: ArrayBuffer): Promise<{ name: string; url: string; image: boolean; size: number }>;
+      open(url: string): Promise<{ ok: boolean; error?: string }>;
+      openEditor(kind: 'note' | 'jumper', index: number): Promise<{ ok: boolean }>;
+    };
     /** Рабочая папка файловых диалогов проекта и шаблонов. */
     cableSettings?: {
       get(): Promise<{ updateDir: string; defaultDir: string }>;
