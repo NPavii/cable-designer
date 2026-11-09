@@ -292,7 +292,7 @@ button:disabled { opacity: 0.42; cursor: default; }
 .tree-context-menu button.danger { color: #b3261e; }
 .tree-context-menu button.danger:hover { background: #f9e9e7; }
 .tree-context-separator { height: 1px; margin: 4px; background: #e5e5e9; }
-.side-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; padding: 3px; border-radius: 6px; background: #e9e9ed; }
+.side-mode-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 6px; background: #e9e9ed; }
 .side-mode-switch button { min-height: 27px; padding: 4px 5px; border-radius: 4px; color: #66666e; font-size: 10px; line-height: 1.2; }
 .side-mode-switch button.active { background: white; color: #202025; box-shadow: 0 1px 3px rgba(0,0,0,.12); font-weight: 600; }
 

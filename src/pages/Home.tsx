@@ -95,11 +95,14 @@ function SideEditor({
         <button className={mode === 'sensor' ? 'active' : ''} onClick={() => onChange({ [`side${side}Mode`]: 'sensor' } as any)}>
           Квадрат
         </button>
+        <button className={mode === 'circle' ? 'active' : ''} onClick={() => onChange({ [`side${side}Mode`]: 'circle' } as any)}>
+          Круг
+        </button>
       </div>
-      {mode === 'sensor' && (
+      {mode !== 'tips' && (
         <div className="space-y-1">
           <div>
-            <span className={lbl}>Название квадрата</span>
+            <span className={lbl}>{mode === 'circle' ? 'Название круга' : 'Название квадрата'}</span>
             <input
               className={inp}
               value={name}
@@ -119,7 +122,7 @@ function SideEditor({
             <input
               className={inp}
               value={extra}
-              placeholder="особенности датчика"
+              placeholder="особенности разъёма"
               onChange={(e) => onChange({ [`side${side}SensorExtra`]: e.target.value } as any)}
             />
           </div>

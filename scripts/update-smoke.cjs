@@ -14,6 +14,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let child;
 let ws;
 let nextId = 1;
+let debugPort = 9224;
 const pending = new Map();
 
 function stopByExe() {
@@ -24,17 +25,18 @@ function stopByExe() {
 }
 
 async function launch() {
-  child = spawn(installExe, ['--remote-debugging-port=9224', `--user-data-dir=${profile}`], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
+  const port = debugPort++;
+  child = spawn(installExe, [`--remote-debugging-port=${port}`, `--user-data-dir=${profile}`], { stdio: 'ignore', env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined } });
   let page;
   for (let i = 0; i < 100; i++) {
     try {
-      const pages = await (await fetch('http://127.0.0.1:9224/json')).json();
+      const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json();
       page = pages.find((p) => p.type === 'page');
       if (page) break;
     } catch {}
     await sleep(200);
   }
-  if (!page) throw new Error('Test application did not start');
+  if (!page) throw new Error(`Test application did not start on debug port ${port}`);
   ws = new WebSocket(page.webSocketDebuggerUrl);
   await new Promise((resolve, reject) => { ws.onopen = resolve; ws.onerror = reject; });
   ws.onmessage = (event) => {
@@ -93,11 +95,13 @@ async function waitFor(expression, timeout = 20000) {
     await evaluate(`[...document.querySelectorAll('.update-dialog button')].find(b => b.textContent.trim() === 'Нет').click()`);
     await sleep(200);
     if (await evaluate('!!document.querySelector(".update-dialog")')) throw new Error('No button did not close update dialog');
-    if (JSON.parse(fs.readFileSync(installPackage, 'utf8')).version !== '1.4.1') throw new Error('No button changed application files');
+    if (JSON.parse(fs.readFileSync(installPackage, 'utf8')).version !== JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version) throw new Error('No button changed application files');
     await sleep(500);
     await evaluate('window.close()');
     ws.close();
     await sleep(1000);
+    stopByExe();
+    await sleep(500);
 
     await launch();
     await waitFor('!!document.querySelector(".update-dialog")');

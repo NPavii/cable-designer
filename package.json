@@ -1,7 +1,7 @@
 {
   "name": "cable-designer",
   "private": true,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
@@ -11,6 +11,8 @@
     "preview": "vite preview",
     "test:smoke": "node scripts/smoke.cjs",
     "test:update": "node scripts/update-smoke.cjs",
+    "test:circle": "node scripts/circle-smoke.cjs",
+    "test:geometry": "node scripts/geometry-smoke.cjs",
     "electron": "electron .",
     "dist": "npm run build && electron-builder"
   },

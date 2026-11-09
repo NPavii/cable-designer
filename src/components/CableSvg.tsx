@@ -171,20 +171,22 @@ function SensorBox({
   );
 }
 
-// Подписи датчика поверх проводов, с белым ореолом для читаемости.
-// Три строки: название, краткое описание, «Дополнительно» (особенности датчика).
+// Подписи квадратного разъёма выносим за контур: название сверху,
+// описание и дополнительные сведения снизу, чтобы текст не пересекал жилы.
 function SensorLabel({
-  x, y, width, name, desc, extra, side
+  x, y, width, height, name, desc, extra, side
 }: {
-  x: number; y: number; width: number; name: string; desc: string; extra?: string; side: 1 | -1;
+  x: number; y: number; width: number; height: number; name: string; desc: string; extra?: string; side: 1 | -1;
 }) {
   const rectX = side === 1 ? x : x - width;
   const textX = rectX + width / 2;
+  const top = y - height / 2;
+  const bottom = y + height / 2;
   return (
-    <g>
+    <g data-connector-label="">
       <text
         x={textX}
-        y={y - 4}
+        y={top - 12}
         fontSize={12}
         textAnchor="middle"
         fontWeight="bold"
@@ -196,7 +198,7 @@ function SensorLabel({
       </text>
       <text
         x={textX}
-        y={y + 10}
+        y={bottom + 16}
         fontSize={9}
         textAnchor="middle"
         fill="#333"
@@ -209,9 +211,56 @@ function SensorLabel({
       {extra && (
         <text
           x={textX}
-          y={y + 23}
+          y={bottom + 28}
           fontSize={8}
           textAnchor="middle"
+          fill="#555"
+          stroke="white"
+          strokeWidth={4}
+          paintOrder="stroke"
+        >
+          {extra}
+        </text>
+      )}
+    </g>
+  );
+}
+
+// Подпись круглого разъёма выносится за контур, чтобы не перекрывать контакты.
+function CircleConnectorLabel({
+  x, y, radius, name, desc, extra
+}: {
+  x: number; y: number; radius: number; name: string; desc: string; extra?: string;
+}) {
+  return (
+    <g textAnchor="middle">
+      <text
+        x={x}
+        y={y - radius - 66}
+        fontSize={12}
+        fontWeight="bold"
+        stroke="white"
+        strokeWidth={5}
+        paintOrder="stroke"
+      >
+        {name || 'Круг'}
+      </text>
+      <text
+        x={x}
+        y={y + radius + 64}
+        fontSize={9}
+        fill="#333"
+        stroke="white"
+        strokeWidth={4}
+        paintOrder="stroke"
+      >
+        {desc}
+      </text>
+      {extra && (
+        <text
+          x={x}
+          y={y + radius + 76}
+          fontSize={8}
           fill="#555"
           stroke="white"
           strokeWidth={4}
@@ -259,7 +308,9 @@ export default function CableSvg({
   // сохраняя кабель и таблицу в пределах печатной страницы.
   const spreadStep = maxSlots > 16 ? Math.max(12, Math.min(24, 480 / maxSlots)) : 30;
 
-  const H = Math.max(160, maxSlots * spreadStep + 50);
+  const hasCircleConnector = cable.sideAMode === 'circle' || cable.sideBMode === 'circle';
+  const hasSensorConnector = cable.sideAMode === 'sensor' || cable.sideBMode === 'sensor';
+  const H = Math.max(hasCircleConnector ? 250 : 160, maxSlots * spreadStep + (hasSensorConnector ? 110 : 50));
   const cy = H / 2;
   const springCy = useSpringNumber(cy, animated);
 
@@ -383,18 +434,20 @@ export default function CableSvg({
       if (wSlots === 0) continue; // жила скрыта на этой стороне
       // Точка соединения — в центре диапазона слотов жилы
       const yJ = slotCenter(total, slot + wSlots / 2 - 0.5);
-      const dx = Math.max(24, Math.abs(xBody - xJ) * 0.5);
+      // Отдельный слот на торце сохраняет порядок жил и убирает общую точку старта.
+      const startY = cy + ((slot + wSlots / 2) / total - 0.5) * 14;
+      const dx = Math.abs(xBody - xJ) * 0.45;
       const marking = side === 'A' ? w.marking : markingB(w);
       const tip = tipOf(side === 'A' ? w.tipA : w.tipB);
 
       if (js.length === 0) {
-        // Жила без перемычек — как раньше: одна S-кривая + наконечник + маркировка.
-        // Маркировка слева — вплотную к наконечнику, по правому краю
+        // Плавная S-кривая без обратного хода и огибания наконечника.
         nodes.push(
           <g key={w.id}>
             <AnimatedPath
               animate={animated}
-              d={`M ${xBody} ${cy} C ${xBody - dir * dx} ${cy}, ${xJ + dir * dx} ${yJ}, ${xJ} ${yJ}`}
+              data-wire-path=""
+              d={`M ${xBody} ${startY} C ${xBody + dir * dx} ${startY}, ${xJ - dir * dx} ${yJ}, ${xJ} ${yJ}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
             <Tip animate={animated} x={xJ} y={yJ} shape={tip} side={dir} />
@@ -413,12 +466,13 @@ export default function CableSvg({
         const yOwn = slotCenter(total, slot); // собственный конец — первый слот группы
         const xLeaf = xJ + dir * LEVEL_W;
         const xJun = xLeaf - dir * GAP;
-        const dxj = Math.max(24, Math.abs(xBody - xJun) * 0.5);
+        const dxj = Math.abs(xBody - xJun) * 0.45;
         nodes.push(
           <g key={w.id}>
             <AnimatedPath
               animate={animated}
-              d={`M ${xBody} ${cy} C ${xBody - dir * dxj} ${cy}, ${xJun + dir * dxj} ${yJ}, ${xJun} ${yJ}`}
+              data-wire-path=""
+              d={`M ${xBody} ${startY} C ${xBody + dir * dxj} ${startY}, ${xJun - dir * dxj} ${yJ}, ${xJun} ${yJ}`}
               stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
             />
             <AnimatedCircle animate={animated} cx={xJun} cy={yJ} r={3.5} fill={w.color} />
@@ -447,10 +501,113 @@ export default function CableSvg({
     return nodes;
   };
 
+  // Круглый разъём: каждая видимая жила получает свой контакт на окружности.
+  // Контакты следуют по часовой стрелке, а маркировка выносится за контур.
+  const renderCircleSide = (side: 'A' | 'B'): ReactNode => {
+    const dir: 1 | -1 = side === 'A' ? -1 : 1;
+    const visible = wires.filter((w) => !(side === 'A' ? w.hiddenA : w.hiddenB));
+    const radius = Math.min(58, Math.max(40, visible.length * 7));
+    const centerX = side === 'A' ? sensorAX - radius : sensorBX + radius;
+    const xBody = side === 'A' ? bodyL : bodyR;
+    const contactDepth = visible.length > 16 ? 11 : 14;
+    const name = side === 'A' ? cable.sideASensorName : cable.sideBSensorName;
+    const desc = side === 'A' ? cable.sideASensorDesc : cable.sideBSensorDesc;
+    const extra = side === 'A' ? cable.sideASensorExtra : cable.sideBSensorExtra;
+
+    return (
+      // Смена плотности — новая топология: не смешиваем старые кривые с новой раскладкой.
+      <g key={`${side}-${visible.length}`} className="circle-connector" data-connector="circle" data-side={side}>
+        <AnimatedCircle
+          animate={animated}
+          cx={centerX}
+          cy={cy}
+          r={radius}
+          fill="white"
+          stroke="#111"
+          strokeWidth={1.5}
+        />
+        {visible.map((w, i) => {
+          // Смещение на полшага убирает горизонтальные траектории через соседние контакты.
+          const angle = -Math.PI / 2 + ((i + 0.5) * Math.PI * 2) / visible.length;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const contactX = centerX + (radius - contactDepth) * cos;
+          const contactY = cy + (radius - contactDepth) * sin;
+          // Старты повторяют положение контактов на торце в двух осях.
+          // Даже симметричные пары не имеют общей начальной точки.
+          const startX = xBody + cos * 7;
+          const startY = cy + sin * 7;
+          const nearBody = side === 'A' ? cos > 0.2 : cos < -0.2;
+          const labelRadius = radius + (visible.length > 12 && i % 2 ? 25 : 16);
+          const labelX = centerX + labelRadius * cos;
+          // На стороне кабеля сдвигаем подпись по вертикали с радиальной линии провода.
+          const labelY = cy + labelRadius * sin + (nearBody ? (sin > 0 ? 24 : -24) : 0);
+          // Плавная S-кривая: обе контрольные точки строго между торцом и контактом,
+          // поэтому провод красиво изгибается, но не образует петлю у подключения.
+          const spanX = Math.abs(startX - contactX);
+          const control1X = startX + dir * spanX * 0.45;
+          const control2X = contactX - dir * spanX * 0.45;
+          const control1Y = startY;
+          const control2Y = contactY;
+          const anchor = cos > 0.25 ? 'start' : cos < -0.25 ? 'end' : 'middle';
+          return (
+            <g key={w.id} data-contact={w.id}>
+              <AnimatedPath
+                animate={animated}
+                data-wire-path=""
+                d={`M ${startX} ${startY} C ${control1X} ${control1Y}, ${control2X} ${control2Y}, ${contactX} ${contactY}`}
+                stroke={w.color}
+                strokeWidth={2.5}
+                fill="none"
+                strokeLinecap="round"
+              />
+              <AnimatedCircle
+                animate={animated}
+                cx={contactX}
+                cy={contactY}
+                r={visible.length > 16 ? 3 : 3.8}
+                fill="white"
+                stroke="#111"
+                strokeWidth={1.1}
+              />
+              <AnimatedCircle
+                animate={animated}
+                cx={contactX}
+                cy={contactY}
+                r={1.35}
+                fill={w.color}
+              />
+              <text
+                data-wire-label=""
+                x={labelX}
+                y={labelY + 3}
+                fontSize={visible.length > 12 ? 9 : 10}
+                textAnchor={anchor}
+                stroke="white"
+                strokeWidth={3}
+                paintOrder="stroke"
+              >
+                {side === 'A' ? w.marking : markingB(w)}
+              </text>
+            </g>
+          );
+        })}
+        <CircleConnectorLabel
+          x={centerX}
+          y={springCy}
+          radius={radius}
+          name={name}
+          desc={desc}
+          extra={extra}
+        />
+      </g>
+    );
+  };
+
   return (
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ fontFamily: 'Arial, sans-serif' }}>
       {/* Сторона А (слева) */}
-      {cable.sideAMode === 'tips' ? (
+      {cable.sideAMode === 'circle' ? renderCircleSide('A') : cable.sideAMode === 'tips' ? (
         renderTipsSide('A')
       ) : (
         // Датчик слева — провода плавно заходят внутрь прямоугольника
@@ -464,25 +621,29 @@ export default function CableSvg({
           />
           {wires.filter((w) => !w.hiddenA).map((w, i, vis) => {
             const y = cy + (i - (vis.length - 1) / 2) * spreadStep;
+            const startY = cy + (i - (vis.length - 1) / 2) * (14 / Math.max(vis.length - 1, 1));
             const lineEndX = sensorAX + enterDepth; // заходим внутрь датчика
-            // Горизонтальная касательная у грани датчика — провод «втыкается» ровно
-            const dx = Math.max(24, (bodyL - lineEndX) * 0.45);
+            // Обе контрольные точки остаются между кабелем и контактом: без петли у квадрата.
+            const dx = Math.abs(bodyL - lineEndX) * 0.45;
             return (
               <g key={w.id}>
                 <AnimatedPath
                   animate={animated}
-                  d={`M ${bodyL} ${cy} C ${bodyL - dx} ${cy}, ${lineEndX + dx} ${y}, ${lineEndX} ${y}`}
+                  data-wire-path=""
+                  data-wire-side="A"
+                  d={`M ${bodyL} ${startY} C ${bodyL - dx} ${startY}, ${lineEndX + dx} ${y}, ${lineEndX} ${y}`}
                   stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
-                <text x={sensorAX - 4} y={y - 6} fontSize={11} textAnchor="end">{w.marking}</text>
+                <text data-wire-label="" x={sensorAX - 4} y={y - 6} fontSize={11} textAnchor="end">{w.marking}</text>
               </g>
             );
           })}
-          {/* Подписи датчика поверх проводов */}
+          {/* Подписи разъёма за контуром, вне траекторий проводов */}
           <SensorLabel
             x={sensorAX}
             y={springCy}
             width={sensorW}
+            height={sensorH}
             name={cable.sideASensorName}
             desc={cable.sideASensorDesc}
             extra={cable.sideASensorExtra}
@@ -492,7 +653,7 @@ export default function CableSvg({
       )}
 
       {/* Сторона Б (справа) */}
-      {cable.sideBMode === 'tips' ? (
+      {cable.sideBMode === 'circle' ? renderCircleSide('B') : cable.sideBMode === 'tips' ? (
         renderTipsSide('B')
       ) : (
         // Датчик справа — провода плавно заходят внутрь прямоугольника
@@ -506,24 +667,28 @@ export default function CableSvg({
           />
           {wires.filter((w) => !w.hiddenB).map((w, i, vis) => {
             const y = cy + (i - (vis.length - 1) / 2) * spreadStep;
+            const startY = cy + (i - (vis.length - 1) / 2) * (14 / Math.max(vis.length - 1, 1));
             const lineEndX = sensorBX + sensorW - enterDepth; // заходим внутрь датчика
-            const dx = Math.max(24, (lineEndX - bodyR) * 0.45);
+            const dx = Math.abs(lineEndX - bodyR) * 0.45;
             return (
               <g key={w.id}>
                 <AnimatedPath
                   animate={animated}
-                  d={`M ${bodyR} ${cy} C ${bodyR + dx} ${cy}, ${lineEndX - dx} ${y}, ${lineEndX} ${y}`}
+                  data-wire-path=""
+                  data-wire-side="B"
+                  d={`M ${bodyR} ${startY} C ${bodyR + dx} ${startY}, ${lineEndX - dx} ${y}, ${lineEndX} ${y}`}
                   stroke={w.color} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
-                <text x={sensorBX + sensorW + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
+                <text data-wire-label="" x={sensorBX + sensorW + 4} y={y - 6} fontSize={11} textAnchor="start">{markingB(w)}</text>
               </g>
             );
           })}
-          {/* Подписи датчика поверх проводов */}
+          {/* Подписи разъёма за контуром, вне траекторий проводов */}
           <SensorLabel
             x={sensorBX}
             y={springCy}
             width={sensorW}
+            height={sensorH}
             name={cable.sideBSensorName}
             desc={cable.sideBSensorDesc}
             extra={cable.sideBSensorExtra}

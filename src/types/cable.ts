@@ -41,7 +41,7 @@ export interface TableColumn {
   hidden?: boolean;    // скрыт на печатном листе (данные сохраняются)
 }
 
-export type SideMode = 'tips' | 'sensor';
+export type SideMode = 'tips' | 'sensor' | 'circle';
 
 export interface Cable {
   id: string;
